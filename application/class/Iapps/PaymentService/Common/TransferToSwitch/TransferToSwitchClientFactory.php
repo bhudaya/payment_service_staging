@@ -58,13 +58,32 @@ class TransferToSwitchClientFactory{
         if( isset($option['trans_date']) )
             $client->setTransDate($option['trans_date']);
         if( isset($option['sender_fullname']) )
-            $client->setSenderFullName($option['sender_fullname']);
+            $client->setSenderFullname($option['sender_fullname']);
         if( isset($option['sender_address']) )
             $client->setSenderAddress($option['sender_address']);
         if( isset($option['sender_phone']) )
             $client->setSenderPhone($option['sender_phone']);
+                
+        if( isset($option['sender_dob']) )
+            $client->setSenderDob($option['sender_dob']);
+        if( isset($option['sender_gender']) )
+            $client->setSenderGender($option['sender_gender']);
+        if( isset($option['sender_nationality']) )
+            $client->setSenderDob($option['sender_nationality']);
+        if( isset($option['sender_host_countrycode']) )
+            $client->setSenderDob($option['sender_host_countrycode']);
+        if( isset($option['sender_host_identity']) )
+            $client->setSenderDob($option['sender_host_identity']);
+        if( isset($option['sender_host_identitycard']) )
+            $client->setSenderDob($option['sender_host_identitycard']);
+
+        if( isset($option['receiver_full_name']) )
+            $client->setReceiverFullname($option['receiver_full_name']);
         if( isset($option['receiver_fullname']) )
-            $client->setReceiverFullName($option['receiver_fullname']);
+            $client->setReceiverFullname($option['receiver_fullname']);
+        if( isset($option['account_holder_name']) )
+            $client->setReceiverFullname($option['account_holder_name']);
+
         if( isset($option['receiver_address']) )
             $client->setReceiverAddress($option['receiver_address']);
         if( isset($option['receiver_mobile_phone']) )
@@ -75,12 +94,6 @@ class TransferToSwitchClientFactory{
             $client->setReceiverGender($option['receiver_gender']);
         if( isset($option['bank_code']) ) {
             $client->setBankCode($option['bank_code']);
-            $branch_name = $option['bank_code'] == '014' ? 'BCA' : 'BCA';
-            $transaction_type = $option['bank_code'] == '014' ? '1' : '1';
-            //$payable_code =  $option['bank_code'] == 'BDO' ? 'CBBM' : 'CBOM';
-            $client->setBranchName($branch_name);
-            $client->setTransactionType($transaction_type);
-            //$client->setPayableCode($payable_code);
         }
         if( isset($option['account_no']) )
             $client->setAccountNo($option['account_no']);

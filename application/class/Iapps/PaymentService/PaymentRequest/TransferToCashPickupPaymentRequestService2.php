@@ -18,15 +18,13 @@ use Iapps\Common\Microservice\AccountService\AccountServiceFactory;
 use Iapps\Common\Core\IappsDateTime;
 use Iapps\PaymentService\Payment\PaymentServiceFactory;
 use Illuminate\Support\Facades\Log;
-use Iapps\Common\Microservice\RemittanceService\RemittanceTransactionService;
 
-
-class TransferToPaymentRequestService extends PaymentRequestService{
+class TransferToCashPickupPaymentRequestService2 extends PaymentRequestService{
 
     function __construct(PaymentRequestRepository $rp, $ipAddress = '127.0.0.1', $updatedBy = NULL)
     {
         parent::__construct($rp, $ipAddress, $updatedBy);
-        $this->payment_code = PaymentModeType::BANK_TRANSFER_TRANSFERTO;
+        $this->payment_code = PaymentModeType::CASH_PICKUP_TRANSFERTO_2;
     }
 
     public function complete($user_profile_id, $request_id, $payment_code, array $response)
@@ -59,13 +57,14 @@ class TransferToPaymentRequestService extends PaymentRequestService{
             return false;
         }
 
-        $TransferTo_switch_client->setReferenceNo($request->getTransactionID());
+
+        $TransferTo_switch_client->setReferenceNo($request->getTransactionID() );
         $TransferTo_switch_client->setTransactionID($request->getTransactionID());
         $country_currency_code = $request->getCountryCurrencyCode();
         
         $TransferTo_switch_client->setCountryCurrencyCode($country_currency_code);
-
-
+        $TransferTo_switch_client->setPaymentMode(TransferToSwitchFunction::PHILIPPINES_CP);
+        
         if( $sender_dob = $request->getOption()->getValue('sender_dob'))
             $TransferTo_switch_client->setSenderDob($sender_dob);
         if( $sender_gender = $request->getOption()->getValue('sender_gender'))
@@ -78,17 +77,18 @@ class TransferToPaymentRequestService extends PaymentRequestService{
             $TransferTo_switch_client->setSenderHostIdentity($sender_host_identity);
         if( $sender_host_identitycard = $request->getOption()->getValue('sender_host_identitycard'))
             $TransferTo_switch_client->setSenderHostIdentitycard($sender_host_identitycard);
+        //if( $account = $request->getOption()->getValue('bank_account') )   //no need
+        //    $TransferTo_switch_client->setAccountNo($account);
 
-        if( $account = $request->getOption()->getValue('bank_account') )
-            $TransferTo_switch_client->setAccountNo($account);
-        if( $account = $request->getOption()->getValue('account_no') )
-            $TransferTo_switch_client->setAccountNo($account);
-
-        if( $receiver_fullname = $request->getOption()->getValue('account_holder_name') )
+        if( $account_holder_name = $request->getOption()->getValue('account_holder_name') )
+            $TransferTo_switch_client->setReceiverFullname($account_holder_name);
+        if( $receiver_full_name = $request->getOption()->getValue('receiver_full_name') )
+            $TransferTo_switch_client->setReceiverFullname($receiver_full_name);
+        if( $receiver_fullname = $request->getOption()->getValue('receiver_fullname') )
             $TransferTo_switch_client->setReceiverFullname($receiver_fullname);
-        if( $bank_code = $request->getOption()->getValue('bank_code') )
-            $TransferTo_switch_client->setBankCode($bank_code);
 
+        //if( $bank_code = $request->getOption()->getValue('bank_code') )  //no need
+        //    $TransferTo_switch_client->setBankCode($bank_code);
         if( $sender_address = $request->getOption()->getValue('sender_address') )
             $TransferTo_switch_client->setSenderAddress($sender_address);
         if( $sender_phone = $request->getOption()->getValue('sender_phone') )
@@ -116,9 +116,8 @@ class TransferToPaymentRequestService extends PaymentRequestService{
 
         $TransferTo_switch_client->setLandedAmount(-1*$request->getAmount());
 
-        //call getOption at TransferToSwitchClient.php , decode from json
-        $option_array = json_decode($TransferTo_switch_client->getOption(), true);
 
+        $option_array = json_decode($TransferTo_switch_client->getOption(), true);
         //set user type
         if( $user_type = $request->getOption()->getValue('user_type')) {
             $option_array['user_type'] = $user_type;
@@ -151,6 +150,10 @@ class TransferToPaymentRequestService extends PaymentRequestService{
             $this->setResponseCode(MessageCode::CODE_INVALID_SWITCH_SETTING);
             return false;
         }
+
+        //set default payment mode = CP2
+        $transferto_switch_client->setPaymentMode(TransferToSwitchFunction::PHILIPPINES_CP);
+
 
         if(!empty($request->getReferenceID())){
             $request->setPending();
@@ -205,7 +208,6 @@ class TransferToPaymentRequestService extends PaymentRequestService{
         return $requests;
     }
 
-
     public function reprocessRequest(PaymentRequest $request){
         //make request to switch
         try{
@@ -228,7 +230,7 @@ class TransferToPaymentRequestService extends PaymentRequestService{
 
             if(array_key_exists("status",$transferto_response_arr)) {
 
-                if ($transferto_response_arr["status"] == "PRC" ||  $transferto_response_arr["status"] == "20000"  ) {
+                if ($transferto_response_arr["status"] == "PRC" || $transferto_response_arr["status"] == "20000") {
                     if ($response = $transferto_switch_client->bankTransfer()) {
                         $ori_request = clone($request);
 
@@ -240,7 +242,7 @@ class TransferToPaymentRequestService extends PaymentRequestService{
                                 $request->getResponse()->setJson(json_encode(array("TMoney Bank Transfer" => $transferto_switch_client->getTransactionType())));
                                 $request->getResponse()->add('transferto_response', $response->getFormattedResponse());
                                 $request->getResponse()->add('transferto_process', $transferto_switch_client->getTransfertoInfo());
-                                $request->setReferenceID($response->getTransactionIDSwitcher());
+                                $request->setReferenceID($response->getRefNoSwitcher());
 
                                 if (parent::_updatePaymentRequestStatus($request, $ori_request)) {
                                     $this->getRepository()->completeDBTransaction();
@@ -258,6 +260,7 @@ class TransferToPaymentRequestService extends PaymentRequestService{
                             $request->getResponse()->setJson(json_encode(array("TMoney Bank Transfer" => $transferto_switch_client->getTransactionType())));
                             $request->getResponse()->add('transferto_response', $response->getFormattedResponse());
                             $request->getResponse()->add('transferto_process', $transferto_switch_client->getTransfertoInfo());
+
 
                             if ($request->getStatus() == PaymentRequestStatus::FAIL) {
                                 $this->setResponseMessage($response->getRemarks());
@@ -280,219 +283,6 @@ class TransferToPaymentRequestService extends PaymentRequestService{
         }
         return false;
     }
-
-    public function findPendingRequestByDate($trx_date){
-        //$datefrom = date('Y-m-d', strtotime($date. ' -5 days'));
-        //$dateto =   date ('Y-m-d', strtotime($date. ' -0  days'));
-        $datefrom = $trx_date . " 00:00:00";
-        $dateto = $trx_date . " 23:59:59";
-
-        $paymentRequestServ = SearchPaymentRequestServiceFactory::build();
-        $paymentRequestServ->setFromCreatedAt(IappsDateTime::fromString($datefrom));
-        $paymentRequestServ->setToCreatedAt(IappsDateTime::fromString($dateto));
-        $requestFilter = new PaymentRequest();
-        //$requestFilter->setStatus(PaymentRequestStatus::FAIL);
-        $requestFilter->setPaymentCode($this->getPaymentCode());
-        $request = $paymentRequestServ->getPaymentBySearchFilter($requestFilter, MAX_VALUE, 1) ;
-        return $request ;
-    }
-
-    public function findTrxInReportFile($filename,$trx_id){
-        $lines = file($filename);
-
-        $j=0;
-        $notfound = false;
-        foreach ($lines as $line_num => $line) {
-            $clm = explode(',',$line);
-            if ($j > 0) {
-                $transactionIDTt = trim(substr($clm[4], 0, 20));
-                echo"trx db :";print_r($trx_id); echo "|";
-                echo"trx TT :";print_r($transactionIDTt);echo"|";
-                if ($transactionIDTt == trim($trx_id)) {
-                    $notfound=false;
-                    //break;
-                }else{
-                    $notfound = true; 
-                }
-            }
-            $j++;
-        }
-
-        return $notfound;
-    }
-    
-    
-    public function reconTransaction($trx_date){
-
-        $transferto_file = "../files/transferto-recon/iApps-". $trx_date .".csv";
-
-        if(!file_exists($transferto_file)) {
-            return false;
-        }    
-
-        //------------------------------ create success and suspect file -----
-        // based on transferto report file
-        $lines = file($transferto_file);
-        $j=0;
-        $header="creation_date;operation_date;transaction_status;t2_id;ext_id;sender_country;sender_name;recipient_country;recipient_name  ;recipient_msisdn;received_amount;received_amount_currency;settlement_amount_sgd;payout_rate_sgd;t2_commission_sgd;total_value_sgd;iapps_status\n";
-
-        $dataSuccess11="";
-        $dataSuccess12="";
-        $dataSuccess10="";
-        $dataFailed21="";
-        $dataFailed22="";
-        $dataFailed20="";
-        foreach ($lines as $line_num => $line) {
-            $statusdb="";
-            $line = str_replace("\n","",$line);
-            $line = str_replace("\r","",$line);
-            
-            if($j == 0){                
-                $dataSuccess11 = $header;
-                $dataSuccess12 = $header;
-                $dataSuccess10 = $header;
-                $dataFailed21 =  $header;
-                $dataFailed22 =  $header;
-                $dataFailed20 =  $header;                
-            }else{            
-                //print_r($line);
-                $clm = explode(',',$line);
-                $status = $clm[2];
-                $transactionID = trim(substr($clm[4],0,20)) ;
-
-                $requests = $this->findRequestByRef($transactionID);
-                if($requests) {
-                    foreach ($requests->result as $req) {
-                        if ($req instanceof PaymentRequest) {
-                            $statusdb = $req->getStatus();
-                        }
-                    }
-                }
-
-                if(trim($status) == "COMPLETED"){
-                    if(trim($statusdb) == "success") {
-                        $dataSuccess11 = $dataSuccess11 . $line . ";" .$statusdb . "\n" ;   //transferto success  - iapps success
-                    }
-                    if(trim($statusdb) == "fail") {
-                       $dataSuccess12 = $dataSuccess12 . $line . ";" .$statusdb . "\n";  //success - fail
-                    }
-                    if(trim($statusdb) == "") {
-                        $dataSuccess10 = $dataSuccess10 . $line . ";" . $statusdb . "\n";  //success - not found
-                    }
-
-                }else{
-                    if(trim($statusdb) == "success") {
-                        $dataFailed21 = $dataFailed21 . $line . ";" .$statusdb . "\n";   //fail - success
-                    }
-                    if(trim($statusdb) == "fail") {
-                        $dataFailed22 = $dataFailed22 . $line . ";" .$statusdb . "\n";  //fail - fail
-                    }
-                    if(trim($statusdb) == "") {
-                        $dataFailed20 = $dataFailed20 . $line . ";" . $statusdb . "\n";  //fail - not found
-                    }
-                }
-            }
-            $j++;
-        }
-
-        $filename ="../files/transferto-recon/transferto-success11-". $trx_date .".csv";
-        $this->createFileRecon($filename,$dataSuccess11);
-        $filename ="../files/transferto-recon/transferto-success12-". $trx_date .".csv";
-        $this->createFileRecon($filename,$dataSuccess12);
-        $filename ="../files/transferto-recon/transferto-success10-". $trx_date .".csv";
-        $this->createFileRecon($filename,$dataSuccess10);
-        $filename ="../files/transferto-recon/transferto-failed21-". $trx_date .".csv";
-        $this->createFileRecon($filename,$dataFailed21);
-        $filename ="../files/transferto-recon/transferto-failed22-". $trx_date .".csv";
-        $this->createFileRecon($filename,$dataFailed22);
-        $filename ="../files/transferto-recon/transferto-failed20-". $trx_date .".csv";
-        $this->createFileRecon($filename,$dataFailed20);
-
-
-
-
-        //------------------------------ create forced file   based on iapps database -----        
-        if ($requests = $this->findPendingRequestByDate($trx_date)){
-
-            $header = "TRANSACTION DATE ; TRANSACTION_ID ; REFERENCE_ID ; EXTERNAL_ID ; STATUS ; STATUS MESSAGE \n";
-            $i=0;
-            $dataNotFound01="";
-            $dataNotFound02="";
-            foreach ($requests->result as $req) {
-                if ($req instanceof PaymentRequest) {
-                    $data  = $req->getCreatedAt()->getString() . ";" ;
-                    $data .= $req->getTransactionID() . ";" ;
-                    $data .= $req->getReferenceID() . ";" ;
-                    $data .= $req->getStatus() ;
-                    $notfound =$this->findTrxInReportFile($transferto_file,$req->getTransactionID());
-                    echo "status:";
-                    print_r($req->getStatus());echo "----- end-------";
-                    if($notfound){
-                        if ($req->getStatus() == "success"){
-                            $dataNotFound01 = $dataNotFound01 . $data . "\n";   //transferto not found  - iapps success
-                        }else{
-                            $dataNotFound02 = $dataNotFound02 . $data . "\n";   //transferto not found  - iapps failed
-
-                        }
-                    }
-
-                    /*
-                    $last_response = $req->getResponse()->toArray() ;
-                    if(array_key_exists("transferto_response",$last_response)) {
-                        $transferto_response = $last_response["transferto_response"];
-                        $transferto_process = $last_response["transferto_process"];
-                        $transferto_response_arr = json_decode($transferto_response, true);
-                        $transferto_process_arr = json_decode($transferto_process, true);
-
-                        if (array_key_exists("status", $transferto_response_arr)) {
-                            //$data .= $transferto_response_arr["status"] . ";";
-                            $data .= $transferto_response_arr["status_message"] . "\n";
-                        }
-                    }*/
-
-                }
-                $i++;
-            }
-            $dataNotFound01 = $header . $dataNotFound01;
-            $dataNotFound02 = $header . $dataNotFound02;
-            $filename ="../files/transferto-recon/transferto-notfound01-". $trx_date .".csv";
-            $this->createFileRecon($filename,$dataNotFound01);
-            $filename ="../files/transferto-recon/transferto-notfound02-". $trx_date .".csv";
-            $this->createFileRecon($filename,$dataNotFound02);
-        }
-        
-        
-        
-
-        return true;
-    }
-
-
-    public function createFileRecon($file_name,$data){
-        if($file = fopen($file_name, "a")) {
-            fwrite($file, $data);
-            fclose($file);
-            chmod($file_name, 0777);
-            return true;
-        }
-        return false;
-    }
-
-
-
-    public function findRequestByRef($trx_id){
-        $payment_request = new PaymentRequest();
-        //$payment_request->setPending();
-        //$payment_request->setPaymentCode($this->getPaymentCode());
-        $payment_request->setTransactionID($trx_id);
-        $requests = $this->getRepository()->findBySearchFilter($payment_request, null, null, null);
-        return $requests;
-
-    }
-    
-    
-    
-    
 
     public function updateRequest(PaymentRequest $request){
         if($this->getRepository()->update($request)){

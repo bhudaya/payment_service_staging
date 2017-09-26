@@ -9,4 +9,10 @@ class TransferToSwitchFunction {
     const TRANSFERTO_STATUS_OUTSTANDING       = "OUTSTANDING";
     const TRANSFERTO_STATUS_FOR_VERIFICATION  = "FOR VERIFICATION";
     CONST TRANSFERTO_TIMEZONE                 = 'tmoney_timezone';
+    CONST PHILIPPINES_CP                      = 'CP2';
+    CONST VIETNAM_CP                          = 'CP3';
+    CONST PHILIPPINES_CP_BANK_CODE            = '399';
+    CONST VIETNAM_CP_BANK_CODE                = '';
+
+
 }
