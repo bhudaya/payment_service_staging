@@ -61,6 +61,8 @@ class PaymentAccessCheckerFactory{
             case PaymentModeType::HOLDING_ACCOUNT_PROJECT:
             case PaymentModeType::HOLDING_ACCOUNT_INVESTMENT:
                 return new HoldingAccountPaymentAccessChecker();
+            case PaymentModeType::BANK_TRANSFER_TRANSFERTO:
+                return new TransferToPaymentAccessChecker();
             default:
                 return new PaymentAccessChecker();
         }
