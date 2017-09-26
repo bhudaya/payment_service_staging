@@ -10,6 +10,7 @@ use Iapps\PaymentService\PaymentRequest\TMoneyInquireTransactionStatusService;
 use Iapps\PaymentService\PaymentRequest\TMoneyRetryTransactionService;
 use Iapps\PaymentService\PaymentRequest\TransfertoRetryTransactionService;
 use Iapps\PaymentService\PaymentRequest\TransfertoCp2RetryTransactionService;
+use Iapps\PaymentService\PaymentRequest\TransfertoReconTransactionService;
 
 class Batch_job extends System_Base_Controller{
 
@@ -96,6 +97,31 @@ class Batch_job extends System_Base_Controller{
         $retry_serv->setIpAddress(IpAddress::fromString($this->_getIpAddress()));
 
         $retry_serv->process();
+        $this->_respondWithSuccessCode(MessageCode::CODE_JOB_PROCESS_PASSED);
+        return true;
+    }
+
+    public function reconTransfertoTransaction()
+    {
+        if (!$system_user_id = $this->_getUserProfileId())
+            return false;
+
+
+        if($this->input->get('trx_date')){
+            $trx_date= $this->input->get('trx_date');
+        }else{
+                $trx_date = Date("Y-m-d");
+            }
+
+
+        //$trx_date= $this->input->get('trx_date') ? IappsDateTime::fromString($this->input->get('trx_date')) : (new IappsDateTime("Y-m-d"));
+        RequestHeader::set(ResponseHeader::FIELD_X_AUTHORIZATION, $this->clientToken);
+
+        $recon_serv = new TransfertoReconTransactionService();
+        $recon_serv->setUpdatedBy($system_user_id);
+        $recon_serv->setIpAddress(IpAddress::fromString($this->_getIpAddress()));
+
+        $recon_serv->process($trx_date);
         $this->_respondWithSuccessCode(MessageCode::CODE_JOB_PROCESS_PASSED);
         return true;
     }

@@ -198,6 +198,7 @@ $route['job/paymentrequest/tmoney/inquire'] = 'common/Batch_job/inquireTMoneyTra
 $route['job/paymentrequest/tmoney/retry'] = 'common/Batch_job/retryTMoneyTransaction';
 $route['job/paymentrequest/transferto/retry'] = 'common/Batch_job/retryTransfertoTransaction';
 $route['job/paymentrequest/transferto_cp2/retry'] = 'common/Batch_job/retryTransfertoCp2Transaction';
+$route['job/paymentrequest/transferto/recon'] = 'common/Batch_job/reconTransfertoTransaction';
 
 
 /*
