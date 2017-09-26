@@ -69,38 +69,7 @@ class Batch_job extends System_Base_Controller{
         $this->_respondWithSuccessCode(MessageCode::CODE_JOB_PROCESS_PASSED);
         return true;
     }
-
-    public function retryTransfertoTransaction()
-    {
-        if (!$system_user_id = $this->_getUserProfileId())
-            return false;
-
-        RequestHeader::set(ResponseHeader::FIELD_X_AUTHORIZATION, $this->clientToken);
-
-        $retry_serv = new TransfertoRetryTransactionService();
-        $retry_serv->setUpdatedBy($system_user_id);
-        $retry_serv->setIpAddress(IpAddress::fromString($this->_getIpAddress()));
-
-        $retry_serv->process();
-        $this->_respondWithSuccessCode(MessageCode::CODE_JOB_PROCESS_PASSED);
-        return true;
-    }
-
-    public function retryTransfertoCp2Transaction()
-    {
-        if (!$system_user_id = $this->_getUserProfileId())
-            return false;
-
-        RequestHeader::set(ResponseHeader::FIELD_X_AUTHORIZATION, $this->clientToken);
-
-        $retry_serv = new TransfertoCp2RetryTransactionService();
-        $retry_serv->setUpdatedBy($system_user_id);
-        $retry_serv->setIpAddress(IpAddress::fromString($this->_getIpAddress()));
-
-        $retry_serv->process();
-        $this->_respondWithSuccessCode(MessageCode::CODE_JOB_PROCESS_PASSED);
-        return true;
-    }
+    
 
     public function reconTransfertoTransaction()
     {
