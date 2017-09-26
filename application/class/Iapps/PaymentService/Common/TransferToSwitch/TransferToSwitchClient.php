@@ -193,10 +193,14 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
                     $response = array('status' => "0", 'status_message' => "Transaction ID is found");
                 } else {
                     if ($rslt["resultCode"] == "1") {
-                        $response = array('status' => "PRC", 'status_message' => $rslt["resultDesc"] );
-                        if ($rslt["status"] == "90200") {  //decline beneficiary
-                            $response = array('status' => $rslt["status"], 'status_message' => $rslt["resultDesc"] );
-                        }
+                        if($this->_last_rc == "20000") {    //esp for confirmed and submited
+                            $response = array('status' => "20000", 'status_message' => $rslt["resultDesc"], 'response' => $rslt["response"]);
+                        }else{
+                            $response = array('status' => "PRC", 'status_message' => $rslt["resultDesc"], 'response' => $rslt["response"]);
+                            if ($rslt["status"] == "90200") {  //decline beneficiary
+                                $response = array('status' => $rslt["status"], 'status_message' => $rslt["resultDesc"], 'response' => $rslt["response"]);
+                            }    
+                        }                                
 
                     } else {
                         $response = array('status' => "PRC", 'status_message' => "Received timeout when check transaction");

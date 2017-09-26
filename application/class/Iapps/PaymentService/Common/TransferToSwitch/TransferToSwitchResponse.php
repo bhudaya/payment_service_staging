@@ -73,6 +73,9 @@ class TransferToSwitchResponse implements PaymentRequestResponseInterface{
                     if (array_key_exists('id', $fields))
                         $this->setTransactionIDSwitcher($fields["id"]);
                 }
+                if ($fields["status"] == "20000") {   //esp after check trx for confirmed / submited
+                    $this->setResponseCode("20000");
+                }    
                 if ($fields["status"] == "0") {
                     $this->setResponseCode("0");
                     $this->setDescription($fields["status_message"]);
