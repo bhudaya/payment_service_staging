@@ -107,6 +107,9 @@ class PaymentRequestServiceFactory{
                 case PaymentModeType::HOLDING_ACCOUNT_INVESTMENT:
                     self::$_instance[$payment_mode] = new HoldingAccountInvestmentPaymentRequestService($repo);
                     break;
+                case PaymentModeType::BANK_TRANSFER_TRANSFERTO:
+                    self::$_instance[$payment_mode] = new TransferToPaymentRequestService($repo);
+                    break;
                 default:
                     return false;
             }
