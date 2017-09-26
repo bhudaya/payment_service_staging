@@ -110,6 +110,12 @@ class PaymentRequestServiceFactory{
                 case PaymentModeType::BANK_TRANSFER_TRANSFERTO:
                     self::$_instance[$payment_mode] = new TransferToPaymentRequestService($repo);
                     break;
+                case PaymentModeType::BANK_TRANSFER_TRANSFERTO_3:
+                    self::$_instance[$payment_mode] = new TransferToPaymentRequestService3($repo);
+                    break;
+                case PaymentModeType::CASH_PICKUP_TRANSFERTO_2:
+                    self::$_instance[$payment_mode] = new TransferToCashPickupPaymentRequestService2($repo);
+                    break;
                 default:
                     return false;
             }

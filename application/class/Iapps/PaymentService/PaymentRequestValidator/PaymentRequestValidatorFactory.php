@@ -49,6 +49,9 @@ class PaymentRequestValidatorFactory{
             case PaymentModeType::OCBC_CREDIT_CARD:
                 return OcbcCreditCardPaymentRequestValidator::make($request);
                 break;
+            case PaymentModeType::BANK_TRANSFER_TRANSFERTO:
+                return TransferToPaymentRequestValidator::make($request);
+                break;
             default:
                 return PaymentRequestValidator::make($request);
         }

@@ -27,4 +27,6 @@ class PaymentModeType{
     const HOLDING_ACCOUNT_INVESTMENT = 'HA3';
     const BANK_TRANSFER_BNI = 'BT9';
     const BANK_TRANSFER_TRANSFERTO = 'TT1';
+    const BANK_TRANSFER_TRANSFERTO_3 = 'TT3';
+    const CASH_PICKUP_TRANSFERTO_2 = 'CP2';
 }

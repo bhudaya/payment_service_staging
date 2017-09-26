@@ -63,6 +63,11 @@ class PaymentAccessCheckerFactory{
                 return new HoldingAccountPaymentAccessChecker();
             case PaymentModeType::BANK_TRANSFER_TRANSFERTO:
                 return new TransferToPaymentAccessChecker();
+            case PaymentModeType::BANK_TRANSFER_TRANSFERTO_3:
+                return new TransferToPaymentAccessChecker();
+            case PaymentModeType::CASH_PICKUP_TRANSFERTO_2:
+                return new TransferToPaymentAccessChecker();
+
             default:
                 return new PaymentAccessChecker();
         }
