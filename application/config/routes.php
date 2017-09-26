@@ -196,6 +196,8 @@ $route['paymentrequest/log'] = 'paymentrequest/Payment_request/getAuditLog';
 $route['job/event/notification/banktransfer/initiated'] = 'common/Batch_job/listenNotifyBankTransferRequestInitiatedQueue';
 $route['job/paymentrequest/tmoney/inquire'] = 'common/Batch_job/inquireTMoneyTransactionStatus';
 $route['job/paymentrequest/tmoney/retry'] = 'common/Batch_job/retryTMoneyTransaction';
+$route['job/paymentrequest/transferto/retry'] = 'common/Batch_job/retryTransfertoTransaction';
+$route['job/paymentrequest/transferto_cp2/retry'] = 'common/Batch_job/retryTransfertoCp2Transaction';
 
 
 /*

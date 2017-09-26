@@ -8,6 +8,8 @@ use Iapps\PaymentService\Common\MessageCode;
 use Iapps\Common\Helper\RequestHeader;
 use Iapps\PaymentService\PaymentRequest\TMoneyInquireTransactionStatusService;
 use Iapps\PaymentService\PaymentRequest\TMoneyRetryTransactionService;
+use Iapps\PaymentService\PaymentRequest\TransfertoRetryTransactionService;
+use Iapps\PaymentService\PaymentRequest\TransfertoCp2RetryTransactionService;
 
 class Batch_job extends System_Base_Controller{
 
@@ -62,6 +64,38 @@ class Batch_job extends System_Base_Controller{
         $tmoney_inquiry_serv->setIpAddress(IpAddress::fromString($this->_getIpAddress()));
 
         $tmoney_inquiry_serv->process();
+        $this->_respondWithSuccessCode(MessageCode::CODE_JOB_PROCESS_PASSED);
+        return true;
+    }
+
+    public function retryTransfertoTransaction()
+    {
+        if (!$system_user_id = $this->_getUserProfileId())
+            return false;
+
+        RequestHeader::set(ResponseHeader::FIELD_X_AUTHORIZATION, $this->clientToken);
+
+        $retry_serv = new TransfertoRetryTransactionService();
+        $retry_serv->setUpdatedBy($system_user_id);
+        $retry_serv->setIpAddress(IpAddress::fromString($this->_getIpAddress()));
+
+        $retry_serv->process();
+        $this->_respondWithSuccessCode(MessageCode::CODE_JOB_PROCESS_PASSED);
+        return true;
+    }
+
+    public function retryTransfertoCp2Transaction()
+    {
+        if (!$system_user_id = $this->_getUserProfileId())
+            return false;
+
+        RequestHeader::set(ResponseHeader::FIELD_X_AUTHORIZATION, $this->clientToken);
+
+        $retry_serv = new TransfertoCp2RetryTransactionService();
+        $retry_serv->setUpdatedBy($system_user_id);
+        $retry_serv->setIpAddress(IpAddress::fromString($this->_getIpAddress()));
+
+        $retry_serv->process();
         $this->_respondWithSuccessCode(MessageCode::CODE_JOB_PROCESS_PASSED);
         return true;
     }
