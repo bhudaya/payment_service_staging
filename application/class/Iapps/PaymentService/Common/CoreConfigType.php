@@ -31,6 +31,11 @@ class CoreConfigType
 
     const OCBC_CREDIT_CARD_MERCHANT_NO = 'ocbc_bpg_merchant_no';
     const OCBC_CREDIT_CARD_TRANSACTION_PASSWORD = 'ocbc_bpg_tranx_password';
-    
+
+    const TRANSFERTO_SWITCH_USERNAME = 'transferto_switch_username';
+    const TRANSFERTO_SWITCH_PASSWORD = 'transferto_switch_password';
+    const TRANSFERTO_SWITCH_BEARER = 'transferto_switch_bearer';
+
+
 
 }
