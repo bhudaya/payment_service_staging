@@ -155,6 +155,7 @@ $route['admin/payment/make'] = 'payment/Admin_payment/makePayment';
 
 $route['admin/payment/request/firstcheck/list'] = 'paymentrequest/Admin_payment_request/getPaymentRequestListForFirstChecker';
 $route['admin/payment/request/firstcheck/update'] = 'paymentrequest/Admin_payment_request/updatePaymentRequestForFirstCheckerResult';
+$route['admin/payment/recondownload'] = 'payment/Admin_payment/reconDownload';
 
 /*
  * Partner Payment APIs
@@ -163,6 +164,7 @@ $route['partner/payment/request'] = 'payment/Partner_payment/request';
 $route['partner/payment/complete'] = 'payment/Partner_payment/complete';
 $route['partner/payment/cancel'] = 'payment/Partner_payment/cancel';
 $route['partner/payment/make'] = 'payment/Partner_payment/makePayment';
+$route['partner/payment/collection/update'] = 'payment/Partner_payment/updateCollection';
 
 $route['partner/payment/listbycreator'] = 'payment/Partner_payment/getPaymentByCreatorArrAndSearchFilter';
 /*
