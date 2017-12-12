@@ -55,7 +55,7 @@ class BNISwitchClient implements PaymentRequestClientInterface{
         $this->config = $config;
 
         if( !$this->_getUserName() OR
-            !$this->_getPassword() OR           
+            !$this->_getPassword() OR
             !$this->_getClientId() OR
             !$this->_getPrivateKeyFile() OR
             !$this->_getUrl())
@@ -117,7 +117,7 @@ class BNISwitchClient implements PaymentRequestClientInterface{
         set_time_limit($this->_getTimeLimit());
 
         if($account_number == "1231234567"  &&  $bank_code == "014"){
-                $response ='<soapenv:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:soapenc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+            $response ='<soapenv:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:soapenc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
                 <soapenv:Header/>
                 <soapenv:Body>
                   <remm:accountInfoInquiryResponse xmlns:remm="http://service.bni.co.id/remm">
@@ -136,10 +136,10 @@ class BNISwitchClient implements PaymentRequestClientInterface{
 
 
     public function checkTrx()
-     {
-         $this->setInquireSignedData($this->generateSignedData('chcek'));
+    {
+        $this->setInquireSignedData($this->generateSignedData('chcek'));
 
-         $option = '<s:Envelope xmlns:env = "http://www.w3.org/2003/05/soap-envelope" xmlns:dpm = "http://www.datapower.com/schemas/management"
+        $option = '<s:Envelope xmlns:env = "http://www.w3.org/2003/05/soap-envelope" xmlns:dpm = "http://www.datapower.com/schemas/management"
             xmlns:dpfunc = "http://www.datapower.com/extensions/functions" xmlns:s = "http://schemas.xmlsoap.org/soap/envelope/" >
             <s:Body xmlns:xsd = "http://www.w3.org/2001/XMLSchema"
             xmlns:xsi = "http://www.w3.org/2001/XMLSchema-instance">
@@ -156,16 +156,16 @@ class BNISwitchClient implements PaymentRequestClientInterface{
             </s:Body>
             </s:Envelope>';
 
-         $this->_option = $option;
-         $header = array
-         (
-             'Content-Type: text/xml',
-         );
-         $this->_http_serv->seturl($this->_getUrl());
+        $this->_option = $option;
+        $header = array
+        (
+            'Content-Type: text/xml',
+        );
+        $this->_http_serv->seturl($this->_getUrl());
 
-         set_time_limit($this->_getTimeLimit());
-         $response = $this->_http_serv->post($header, $this->_option);
-         return new BNISwitchResponse($response, 'poInfoInquiry');  //
+        set_time_limit($this->_getTimeLimit());
+        $response = $this->_http_serv->post($header, $this->_option);
+        return new BNISwitchResponse($response, 'poInfoInquiry');  //
     }
 
 
@@ -210,7 +210,7 @@ class BNISwitchClient implements PaymentRequestClientInterface{
         if(!$inquire_signed_data = $this->getInquireSignedData()){
             $this->setInquireSignedData($this->generateSignedData('remit'));
         }
-        
+
         $option = '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
                     <s:Body xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
                     <processPO xmlns="http://service.bni.co.id/remm">
@@ -427,7 +427,7 @@ class BNISwitchClient implements PaymentRequestClientInterface{
 
 
     //getter/setter
-     public function setSignedData($signed_data)
+    public function setSignedData($signed_data)
     {
         $this->signed_data = $signed_data;
         return $this;
@@ -482,7 +482,7 @@ class BNISwitchClient implements PaymentRequestClientInterface{
         return $this->trans_date_bni;
     }
 
-     public function setTransDate($trans_date)
+    public function setTransDate($trans_date)
     {
         $this->trans_date = $trans_date;
         return $this;
@@ -655,7 +655,7 @@ class BNISwitchClient implements PaymentRequestClientInterface{
     public function getReceiverAddress()
     {
         return $this->receiver_address;
-}   
+    }
 
     public function setReceiverAddress1($receiver_address1)
     {
@@ -868,7 +868,7 @@ class BNISwitchClient implements PaymentRequestClientInterface{
         return json_encode($option);
     }
 
-    
-    
-    
+
+
+
 }
