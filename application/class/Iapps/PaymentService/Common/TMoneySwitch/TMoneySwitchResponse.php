@@ -6,6 +6,8 @@ use Iapps\Common\Helper\ResponseMessage;
 use Iapps\PaymentService\PaymentRequest\PaymentRequestResponseInterface;
 use Iapps\Common\Helper\StringMasker;
 use Iapps\PaymentService\PaymentRequest\PaymentRequestStatus;
+use Iapps\PaymentService\SwitcherMessage\SwitcherMessageServiceFactory;
+
 
 class TMoneySwitchResponse implements PaymentRequestResponseInterface{
     protected $raw;
@@ -42,9 +44,15 @@ class TMoneySwitchResponse implements PaymentRequestResponseInterface{
     protected $dest_bankacc;
     protected $dest_bankname;
     protected $token ;
+    protected $_SwitcherMsgService;
+    
 
     function __construct($response, $api_request)
     {
+        $this->_SwitcherMsgService = SwitcherMessageServiceFactory::build() ;
+        //$msg = $this->_SwitcherMsgService->getMessage("PB-006","en-GB","tmoney"); //en-GB
+        //print_r($msg); 
+        
         $this->setAPIRequest($api_request);
         $this->setRaw($response);
     }
@@ -53,18 +61,29 @@ class TMoneySwitchResponse implements PaymentRequestResponseInterface{
     protected function _extractResponse(array $fields)
     {
 
+        $msg = Null;
+        if (array_key_exists('resultCode', $fields)){
+            $msg = $this->_SwitcherMsgService->getMessage($fields["resultCode"], "en-GB", "tmoney") ; //en-GB English UK
+            if($msg) {
+                $fields["resultDesc"] = $msg;
+            }
+        }
+
         $this->setFormattedResponse($fields);
         if(array_key_exists('resultDesc', $fields)) {
 
             foreach ($fields AS $field => $value) {
 
-                if ($field == 'resultCode') {
-                    $this->setResponseCode($value);
-                }
+
                 if ($field == 'resultDesc') {
                     $this->setDescription($value);
                     $this->setRemarks($value);
                 }
+
+                if ($field == 'resultCode') {
+                    $this->setResponseCode($value);
+                }                          
+                
                 if ($field == 'transactionID') {
                     $this->setTransactionIDSwitcher($value);
                 }
@@ -121,8 +140,9 @@ class TMoneySwitchResponse implements PaymentRequestResponseInterface{
                 }
 
                 if ($field == 'user') {
-                    $this->setUser($value); //object                    
+                    $this->setUser($value); //object
                     $this->setToken($value->token);
+
                 }
 
             }

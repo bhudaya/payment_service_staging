@@ -18,6 +18,7 @@ class PaymentMode extends IappsBaseEntity{
     protected $is_payment_mode;
     protected $is_collection_mode;
     protected $delivery_time;
+    protected $ss_supported_channel;
 
     protected $attributes;
 
@@ -128,6 +129,17 @@ class PaymentMode extends IappsBaseEntity{
     {
         return $this->delivery_time;
     }
+    
+    public function setSSSupportedChannel($channels)
+    {
+        $this->ss_supported_channel = $channels;
+        return $this;
+    }
+    
+    public function getSSSupportedChannel()
+    {
+        return $this->ss_supported_channel;
+    }
 
     public function setAttributes(PaymentModeAttributeCollection $attributeCollection)
     {
@@ -138,6 +150,15 @@ class PaymentMode extends IappsBaseEntity{
     public function getAttributes()
     {
         return $this->attributes;
+    }
+    
+    public function isChannelSupportedForSelfService($channel_code)
+    {
+        $supported_codes = is_null($this->ss_supported_channel) ? array() : explode("|", $this->ss_supported_channel);
+        if( count($supported_codes) <= 0 )            
+            return true;    //no need to check
+        
+        return in_array($channel_code, $supported_codes);        
     }
 
     public function jsonSerialize()
@@ -153,6 +174,7 @@ class PaymentMode extends IappsBaseEntity{
         $json['is_payment_mode'] = (bool)$this->getIsPaymentMode();
         $json['is_collection_mode'] = (bool)$this->getIsCollectionMode();
         $json['delivery_time'] = $this->getDeliveryTime()->getCode();
+        $json['ss_supported_channel'] = $this->getSSSupportedChannel();
 
         return $json;
     }

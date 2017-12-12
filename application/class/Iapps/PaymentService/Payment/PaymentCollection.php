@@ -6,6 +6,20 @@ use Iapps\Common\Core\IappsBaseEntityCollection;
 
 class PaymentCollection extends IappsBaseEntityCollection{
 
+    public function joinPaymentMode(IappsBaseEntityCollection $modes)
+    {
+        $modes->indexField('code');
+        foreach( $this AS $payment)
+        {
+            if( $mode = $modes->getFromIndex('code', $payment->getPaymentCode() ) )
+            {
+                $payment->setPaymentModeName($mode->getName());
+            }
+        }
+        
+        return $this;
+    }
+    
     public function sortByCreatedAt()
     {
         $data = $this->toArray();

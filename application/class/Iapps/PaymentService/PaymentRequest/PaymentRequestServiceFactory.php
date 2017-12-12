@@ -116,6 +116,10 @@ class PaymentRequestServiceFactory{
                 case PaymentModeType::CASH_PICKUP_TRANSFERTO_2:
                     self::$_instance[$payment_mode] = new TransferToCashPickupPaymentRequestService2($repo);
                     break;
+                case PaymentModeType::MAIN_AGENT_WORK_CREDIT:
+                    self::$_instance[$payment_mode] = new WorkCreditPaymentRequestService($repo);
+                    break;
+
                 default:
                     return false;
             }

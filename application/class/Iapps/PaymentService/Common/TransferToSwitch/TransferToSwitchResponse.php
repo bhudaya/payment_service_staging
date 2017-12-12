@@ -43,7 +43,7 @@ class TransferToSwitchResponse implements PaymentRequestResponseInterface{
     protected $dest_bankname;
     protected $token ;
     protected $quotID;
-    
+    protected $payer_transaction_code ;
 
     function __construct($response, $api_request)
     {
@@ -63,7 +63,6 @@ class TransferToSwitchResponse implements PaymentRequestResponseInterface{
 
              $this->setFormattedResponse($fields);
 
-             //$this->setResponseCode($fields["status"]);
 
             //handle manipulate from client
             if (array_key_exists('status', $fields)) {
@@ -73,13 +72,36 @@ class TransferToSwitchResponse implements PaymentRequestResponseInterface{
                     if (array_key_exists('id', $fields))
                         $this->setTransactionIDSwitcher($fields["id"]);
                 }
-                if ($fields["status"] == "20000") {   //esp after check trx for confirmed / submited
-                    $this->setResponseCode("20000");
-                }    
                 if ($fields["status"] == "0") {
                     $this->setResponseCode("0");
                     $this->setDescription($fields["status_message"]);
+                    if (array_key_exists('id', $fields))
+                        $this->setTransactionIDSwitcher($fields["id"]);
                 }
+                if ($fields["status"] == "20000") {   //esp after check trx for confirmed / submited
+                    $this->setResponseCode("20000");
+                    if (array_key_exists('id', $fields))
+                        $this->setTransactionIDSwitcher($fields["id"]);
+                }
+
+                if ($fields["status"] == "50000") {   //esp after check trx for  submited
+                    $this->setResponseCode("50000");
+                    if (array_key_exists('id', $fields))
+                        $this->setTransactionIDSwitcher($fields["id"]);
+
+                    if (array_key_exists('payer_transaction_reference', $fields))
+                        $this->setPayerTransactionCode($fields["payer_transaction_reference"]);
+                }
+
+                if ($fields["status"] == "60000") {   //esp after check trx for  available
+                    $this->setResponseCode("60000");
+                    if (array_key_exists('id', $fields))
+                        $this->setTransactionIDSwitcher($fields["id"]);
+                    if (array_key_exists('response', $fields))
+                        $this->setPayerTransactionCode($fields["response"]["payer_transaction_reference"]);
+                }
+
+
             }
 
 
@@ -94,6 +116,10 @@ class TransferToSwitchResponse implements PaymentRequestResponseInterface{
                  $this->setResponseCode("0");
                  $this->setTransactionIDSwitcher($fields["id"]);
 
+                 if (array_key_exists('payer_transaction_reference', $fields))
+                   $this->setPayerTransactionCode($fields["payer_transaction_reference"]);
+
+
                  if ($this->getAPIRequest() == "quotation") {
                      $this->setQuotID($fields["id"]);
                  }
@@ -102,6 +128,8 @@ class TransferToSwitchResponse implements PaymentRequestResponseInterface{
                      $this->setDescription($fields["status_message"]);
                      if ($fields["status"] == "10000" ) {
                          $this->setResponseCode("0");
+                         if (array_key_exists('id', $fields))
+                             $this->setTransactionIDSwitcher($fields["id"]);
                      }else{
                          $this->setResponseCode($fields["status"]);
                      }
@@ -123,7 +151,18 @@ class TransferToSwitchResponse implements PaymentRequestResponseInterface{
              if (array_key_exists('firstname', $fields)) {
                  if ($this->getAPIRequest() == "checkaccount") {
                      $this->setResponseCode("0");
-                     $this->setDestAccHolder($fields['firstname'] . ' ' . $fields['lastname']);
+
+                     if(isset($fields['bank_account_holder_name']) ) {
+                         $this->setDestAccHolder($fields['bank_account_holder_name']);
+                     }else{
+                         $this->setDestAccHolder($fields['firstname']);
+                         if (isset($fields['lastname'])) {
+                             $this->setDestAccHolder($fields['firstname'] . ' ' . $fields['lastname']);
+                         }
+                         if (!isset($fields['firstname'])) {
+                             $this->setDestAccHolder($fields['lastname']);
+                         }
+                     }
                  }
              }
 
@@ -184,8 +223,10 @@ class TransferToSwitchResponse implements PaymentRequestResponseInterface{
 
     public function isPending()
     {
-        return (in_array($this->getResponseCode(), array('20000','50000','PRC')) || in_array($this->getResponseStatus(), array(TransferToSwitchFunction::TRANSFERTO_STATUS_INPROCESS, TransferToSwitchFunction::TRANSFERTO_STATUS_OUTSTANDING, TransferToSwitchFunction::TRANSFERTO_STATUS_FOR_VERIFICATION)));
+        return (in_array($this->getResponseCode(), array('20000','50000','PRC' ,'60000')) || in_array($this->getResponseStatus(), array(TransferToSwitchFunction::TRANSFERTO_STATUS_INPROCESS, TransferToSwitchFunction::TRANSFERTO_STATUS_OUTSTANDING, TransferToSwitchFunction::TRANSFERTO_STATUS_FOR_VERIFICATION)));
     }
+
+   
 
     public function getStatus()
     {
@@ -194,11 +235,27 @@ class TransferToSwitchResponse implements PaymentRequestResponseInterface{
         {
             $status = PaymentRequestStatus::SUCCESS;
         }elseif($this->isPending())
+
         {
             $status = PaymentRequestStatus::PENDING;
+        }elseif($this->isSubmitted())
+
+        {
+            $status = PaymentRequestStatus::SUBMITTED;
         }
 
-        return $status;
+
+           return $status;
+    }
+
+   
+    public function getPayerTransactionCode()
+    {
+        return $this->payer_transaction_code;
+    }
+    public function setPayerTransactionCode($payer_transaction_code)
+    {
+        $this->payer_transaction_code = $payer_transaction_code;
     }
 
     public function setResponseCode($response_code)

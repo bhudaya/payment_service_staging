@@ -27,8 +27,9 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
     protected $sender_address2;
     protected $sender_address3;
     protected $sender_address4;
-
     protected $sender_phone;
+    protected $sender_postal_code;
+
     protected $receiver_fullname;
     protected $receiver_firstname;
     protected $receiver_lastname;
@@ -75,6 +76,8 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
     protected $sender_host_countrycode;
     protected $sender_host_identity;
     protected $sender_host_identitycard;
+    protected $sender_id_type;
+
 
     protected $country_currency_code ;
     protected $receiver_country_iso_code;
@@ -98,6 +101,17 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
     protected $_timeout_of_check_trx = 0;
     protected $_checkTrxType     = '3';
     protected $_internal_reff_id  ;
+
+    protected $sender_lastname2;
+    protected $sender_lastname3;
+    protected $sender_lastname4;
+    protected $sender_lastname_php;
+    protected $receiver_lastname2;
+    protected $receiver_lastname3;
+    protected $receiver_lastname4;
+    protected $receiver_lastname_php;
+
+
 
 
     function __construct(array $config)
@@ -141,23 +155,33 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
         $this->_addInfo("number_of_check_trx",$this->_number_of_check_trx);
         $this->_addInfo("timeout_of_check_trx",$this->_timeout_of_check_trx);
 
+
         if($response) {
             $response_arr = json_decode($response, true);
+            //$response_arr= array("status"=>"60000" ,"status_message" => "AVAILABLE" ,"payer_transaction_reference"=>"1507712155");
+
             if (array_key_exists("status",$response_arr)){
+
+                $selectedResponse = $this->getSelectedArray($response_arr,array('beneficiary','id','status','status_message' ,'payer_transaction_reference'));
+
                 if ($response_arr["status_message"] == "COMPLETED") {
-                    $response = array('resultCode' => "0", 'resultDesc' => "Transaction ID is found");
+                    $response = array('resultCode' => "0", 'resultDesc' => $response_arr["status_message"] ,'response'=>$selectedResponse  );
                     return $response;
                 }
+                $response = array('resultCode' => "1", 'status' => $response_arr["status"],'resultDesc' => $response_arr["status_message"] ,'response'=>$selectedResponse );
             }
-            $response = array('resultCode' => "1", 'status' => $response_arr["status"],'resultDesc' => $response_arr["status_message"]);
+            //transaction id not found
+            if (array_key_exists("errors",$response_arr)){
+                $response = array('resultCode' => "1", 'status' =>  $response_arr["errors"][0]["code"] ,'resultDesc' => $response_arr["errors"][0]["message"] );
+            }
             return $response ;
         }
 
-        
+
         $response = array('status' => "PRC", 'status_message' => "Received timeout when check transaction");
         $this->_timeout_of_check_trx=1;
         $this->_addInfo("timeout_of_check_trx",$this->_timeout_of_check_trx);
-        return $response ;        
+        return $response ;
     }
 
 
@@ -166,7 +190,7 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
         $this->getLastResponse(); //get from  db fields
         $this->setLastResponse(); //set to class fields
 
-        if ($this->_last_rc == "PRC"  ||  $this->_last_rc == "20000" ) {
+        if ($this->_last_rc == "PRC"  ||  $this->_last_rc == "20000"  ||  $this->_last_rc == "50000" ||  $this->_last_rc == "60000") {     //50000=submitted
 
             $info = $this->_check_trx_info;
             $startDate = date("Y-m-d");
@@ -179,33 +203,39 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
             if (array_key_exists('trxID', $info))
                 $trxID = $info["trxID"];
 
+
+
             //check transaction timeout || after transfer timeout
-            if ( ($this->_last_process == "check_transaction"  && $this->_number_of_check_trx <=2  &&  $this->_timeout_of_check_trx ==1)    ||   ($this->_last_process == "transfer" && $this->_number_of_check_trx == 0)) {
+            if ( ($this->_last_process == "check_transaction"  && $this->_number_of_check_trx <=2  &&  $this->_timeout_of_check_trx ==1)
+                   ||   ($this->_last_process == "transfer" && $this->_number_of_check_trx == 0)   ||  ($this->_last_rc == "20000"  ||  $this->_last_rc == "50000"  ||  $this->_last_rc == "60000" ) ) {
 
                 $rslt = $this->checkTrx($trxID);
 
-                if($this->_number_of_check_trx == 3){
+                if($this->_number_of_check_trx == 3  &&  ( $this->_last_rc != "20000"   && $this->_last_rc != "50000" && $this->_last_rc != "60000") ){
                     $response = array('status' => "", 'status_message' => "Received timeout when check transaction");
                     $response = json_encode($response);
                     return new TransferToSwitchResponse($response, "checkTrx");
                 }
                 if ($rslt["resultCode"] == "0") {
-                    $response = array('status' => "0", 'status_message' => "Transaction ID is found");
+                    $response = array('status' => "0", 'status_message' => $rslt["resultDesc"] ,'id'=>$trxID ,'response'=>$rslt["response"]);
                 } else {
                     if ($rslt["resultCode"] == "1") {
-                        if($this->_last_rc == "20000") {    //esp for confirmed and submited
-                            $response = array('status' => "20000", 'status_message' => $rslt["resultDesc"], 'response' => $rslt["response"]);
-                        }else{
+
+                        if($this->_last_rc == "20000" || $this->_last_rc == "50000" || $this->_last_rc == "60000"){    //esp for confirmed submited , available
+                            $response = array('status' => $rslt["status"], 'status_message' => $rslt["resultDesc"], 'response' => $rslt["response"]);
+
+                        }else {
                             $response = array('status' => "PRC", 'status_message' => $rslt["resultDesc"], 'response' => $rslt["response"]);
                             if ($rslt["status"] == "90200") {  //decline beneficiary
                                 $response = array('status' => $rslt["status"], 'status_message' => $rslt["resultDesc"], 'response' => $rslt["response"]);
-                            }    
-                        }                                
+                            }
+                        }
 
                     } else {
                         $response = array('status' => "PRC", 'status_message' => "Received timeout when check transaction");
                     }
                 }
+
                 $response = json_encode($response);
                 return new TransferToSwitchResponse($response, "checkTrx");
             }
@@ -213,7 +243,10 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
 
         if ($quotResponse = $this->quotation()) {
             $this->_quot_response = json_decode($quotResponse->getFormattedResponse(), true);
-            $this->_addInfo("quotation_response", $this->getSelectedArray($this->_quot_response, array("creation_date", "external_id","id","source","wholesale_fx_rate","fee")));
+
+            if(array_key_exists("creation_date",$this->_quot_response))
+             $this->_addInfo("quotation_response", $this->getSelectedArray($this->_quot_response, array("creation_date", "external_id","id","source","wholesale_fx_rate","fee")));
+
             if (!$quotResponse->isSuccess()) {
                 return $quotResponse;
             }
@@ -226,11 +259,13 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
 
             $this->_inquiry_response = json_decode($inquiryResponse->getFormattedResponse(),true) ;
             $this->setSwitcherTransactionNo($inquiryResponse->getTransactionIDSwitcher());
-            $this->_addInfo("inquiry_response",$this->getSelectedArray($this->_inquiry_response , array("status","status_message","creation_date","external_id","id","status","status_message")));
+
+            if(array_key_exists("creation_date",$this->_quot_response))
+                $this->_addInfo("inquiry_response",$this->getSelectedArray($this->_inquiry_response , array("status","status_message","creation_date","external_id","id","status","status_message")));
 
 
             if (!$inquiryResponse->isSuccess()) {
-                
+
                // max 2 times in inquiry timeout
                 if($inquiryResponse->getResponseCode() == "PRC"  &&  $this->_inquiry_hit_count == 2 ){
                     $response = array(
@@ -239,16 +274,16 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
                     );
                     $response = json_encode($response);
                     return new TransferToSwitchResponse($response,"inquiry");
-                }                
+                }
                 return $inquiryResponse;
             }
-            $this->_removeInfo("signin_response");
         }else{return false;}
 
         if( $trfResponse = $this->transfer()) {
 
             $this->_transfer_response = json_decode($trfResponse->getFormattedResponse(),true) ;
-            $this->_addInfo("transfer_response",$this->getSelectedArray($this->_transfer_response , array("status","status_message","creation_date","id","status","status_message")));
+            if(array_key_exists("creation_date",$this->_quot_response))
+                $this->_addInfo("transfer_response",$this->getSelectedArray($this->_transfer_response , array("status","status_message","creation_date","id","status","status_message")));
             if (!$trfResponse->isSuccess()) {
 
                 //if the first process is timeout , set to timeout and will call check trx at the second hit
@@ -269,6 +304,7 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
 
 
             }
+
             return $trfResponse;
         }else{return false;}
 
@@ -287,6 +323,7 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
         $this->_option = $option;
         $uri = "payers/". $this->getBankCode() ."/credit-party-information?bank_account_number=".$this->getAccountNo();
         $response = $this->_http_serv->get($this->header, $option, $uri);
+        print_r($response);
         return new TransferToSwitchResponse($response, 'checkaccount');
     }
 
@@ -302,10 +339,18 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
         $dest = array('amount'=>$this->getLandedAmount(),'currency'=>$this->getLandedCurrency());
 
         if($this->getPaymentMode() == TransferToSwitchFunction::PHILIPPINES_CP){
-            $this->setBankCode(TransferToSwitchFunction::PHILIPPINES_CP_BANK_CODE);  //cash pickup philippines
+            if($this->_getTransfertoEnv() == "PRODUCTION") {
+                $this->setBankCode(TransferToSwitchFunction::PHILIPPINES_CP_BANK_CODE_PROD);  //cash pickup philippines
+            }else{
+                $this->setBankCode(TransferToSwitchFunction::PHILIPPINES_CP_BANK_CODE);  //cash pickup philippines
+            }            
         }
         if($this->getPaymentMode() == TransferToSwitchFunction::VIETNAM_CP){
             $this->setBankCode(TransferToSwitchFunction::VIETNAM_CP_BANK_CODE);  //cash pickup vietnam
+        }
+
+        if($this->getPaymentMode() == TransferToSwitchFunction::BANK_TRANSFER_TT1){
+            $this->setReceiverMobilePhone("");
         }
 
         $option = array(
@@ -314,8 +359,8 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
             'mode'=>"DESTINATION_AMOUNT",
             'source'=>$source,
             'destination'=>$dest,
-            'retail_fee'=>"1",
-            'retail_fee_currency'=>"IDR"
+            'retail_fee'=>"",
+            'retail_fee_currency'=>""
         );
 
         $this->_addInfo("quotation_param",$this->getSelectedArray($option , array("external_id","payer_id")));
@@ -340,28 +385,44 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
             'ifs_code'=>$this->getIfsCode()
         );
 
+        $id_number="";
+        $id_delivery_date="";
+        if(array_key_exists('number', $this->getSenderHostIdentity())) {
+            $id_number = $this->getSenderHostIdentity()["number"];
+            $id_delivery_date = substr($this->getSenderHostIdentity()["issue_date"],0,10);
+        }
+
+        $sender_firstname="";
+        $receiver_firstname="";
+        /*
+        //for philippines need first name but for CP2 and indonesia need empty
+        if($this->landed_currency =="PHP" && $this->getPaymentMode() != TransferToSwitchFunction::PHILIPPINES_CP){
+            $sender_firstname = $this->getSenderFirstname();
+            $receiver_firstname = $this->getReceiverFirstName();
+        }*/
+
         $sender = array(
             'lastname'=>$this->getSenderLastname() ,
-            'firstname'=>$this->getSenderFirstname(),
+            'firstname'=>$sender_firstname,
             'nationality_country_iso_code'=>$this->getSenderNationality(),
             'date_of_birth'=>$this->getSenderDob(),
             'country_of_birth_iso_code'=>"",
             'gender'=>$this->getSenderGender(),
             'address'=>$this->getSenderAddress(),
-            'postal_code'=>"",
+            'postal_code'=>$this->getSenderPostalCode(),
             'city'=>$this->getSenderAddress3(),
             'country_iso_code'=>$this->getSenderHostCountrycode(),
             'msisdn'=>$this->getSenderPhone() ,
             'email'=>"",
-            //'id_type'=>$this->getSenderHostIdentity(),
-            'id_type'=>"",
-            'id_number'=>$this->getSenderHostIdentity(),
-            'id_delivery_date'=>$this->getTransDate()
+            'id_type'=>$this->getSenderIdType(),
+            'id_number'=>$id_number,
+            'id_delivery_date'=>$id_delivery_date            
+            
         );
 
         $beneficiary = array(
             'lastname'=>$this->getReceiverLastName() ,
-            'firstname'=>$this->getReceiverFirstName(),
+            'firstname'=>$receiver_firstname,
             'nationality_country_iso_code'=>"",
             'date_of_birth'=>"",
             'country_of_birth_iso_code'=>"",
@@ -377,8 +438,7 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
             'sender'=>$sender,
             'beneficiary'=>$beneficiary,
             'external_id'=>$this->_internal_reff_id,
-            'purpose_of_remittance'=>"FAMILY_SUPPORT",
-            'callback_url'=>"https://mm-callback.transferto.com/"
+            'purpose_of_remittance'=>"FAMILY_SUPPORT"
         );
 
         $this->_addInfo("inquiry_param",$this->getSelectedArray($option , array("external_id","sender","beneficiary")));
@@ -390,14 +450,6 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
         $uri = "quotations/". $this->getQuotID() ."/transactions";
         $response = $this->_http_serv->post($this->header, $option, $uri);
         return new TransferToSwitchResponse($response, 'inquiry');
-
-        /*
-        //---------------- test inquiry timeout ---------------
-        $response = array("status"=>"PRC","status_message"=>"Received timeout when inquiry process");
-        $response = json_encode($response);
-        return new TransferToSwitchResponse($response,"transfer");
-        //-------------------------------------------------------------------------
-        */
     }
 
 
@@ -430,10 +482,12 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
     {
         $c = new TransferToSwitchClient($config);
 
+        /*
         $c->setSenderNationality("SGP");
-        $c->setSenderDob("1900-01-01");
+        $c->setSenderDob("1990-01-01");
         $c->setSenderLastname("lastname");
         $c->setReceiverLastName("lastname");
+        */
 
 
         if( isset($option['signed_data']) )
@@ -465,6 +519,11 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
             $c->setSenderHostIdentity($option['sender_host_identity']);
         if( isset($option['sender_host_identitycard']) )
             $c->setSenderHostIdentitycard($option['sender_host_identitycard']);
+        if( isset($option['sender_postal_code']) )
+            $c->setSenderPostalCode($option['sender_postal_code']);
+        if( isset($option['sender_id_type']) )
+            $c->setSenderIdType($option['sender_id_type']);
+
 
         if( isset($option['receiver_full_name']) )//esp for CP2
             $c->setReceiverFullname($option['receiver_full_name']);
@@ -472,7 +531,7 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
             $c->setReceiverFullname($option['receiver_fullname']);
         if( isset($option['account_holder_name']) )
             $c->setReceiverFullname($option['account_holder_name']);
-                
+
         if( isset($option['receiver_address']) )
             $c->setReceiverAddress($option['receiver_address']);
         if( isset($option['receiver_mobile_phone']) )
@@ -504,9 +563,34 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
         return $c;
     }
 
+   
+   
+
 
 
     //------------  getter and setter
+
+    public function getSenderIdType()
+    {
+        return $this->sender_id_type;
+    }
+    public function setSenderIdType($sender_id_type)
+    {
+        if($sender_id_type == "Other"  ||  $sender_id_type == "Passport") {
+            $sender_id_type = "PASSPORT";
+        }elseif ($sender_id_type == "NRIC"  ||  $sender_id_type == "KTP"){
+            $sender_id_type ="BIRTH_CERTIFICATE";
+        }elseif($sender_id_type == "Work Permit"  ||  $sender_id_type == "Employment Pass") {
+            $sender_id_type = "EMPLOYER_ID";
+        }else{
+            $sender_id_type = "OTHER";
+        }
+
+        $this->sender_id_type = $sender_id_type;
+    }
+    
+    
+    
 
     public function getSwitcherTransactionNo()
     {
@@ -582,6 +666,9 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
         return false;
     }
 
+
+
+
     protected function _getPin()
     {
         if( array_key_exists('pin', $this->config) )
@@ -630,6 +717,15 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
         return 90;
     }
 
+    protected function _getTransfertoEnv()
+    {
+        if( getenv('TRANSFERTO_ENV') ) {
+            return getenv('TRANSFERTO_ENV');
+        }
+        return "DEVELOPMENT";
+    }
+
+
     protected function _getCountryIsoCode3Char($code){
 
         switch ($code) {
@@ -644,6 +740,18 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
                 break;
             case "PH":
                 $result="PHL";
+                break;
+            case "Indonesian":
+                $result="IDN";
+                break;
+            case "Singaporean":
+                $result="SGP";
+                break;
+            case "Filipino (Philippines)":
+                $result="PHL";
+                break;
+            case "Indian":
+                $result="IND";
                 break;
             default:
                 $result=$code;
@@ -733,14 +841,33 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
         $this->sender_firstname = isset($arrName[0]) ? $arrName[0] : '';
         $this->sender_middlename = isset($arrName[1]) ? $arrName[1] : '';
         $this->sender_lastname = isset($arrName[2]) ? $arrName[2] : '';
+        $this->sender_lastname2 = isset($arrName[3]) ? $arrName[3] : '';
+        $this->sender_lastname3 = isset($arrName[4]) ? $arrName[4] : '';
+        $this->sender_lastname4 = isset($arrName[5]) ? $arrName[5] : '';
 
-        if($this->sender_firstname)
-            $this->sender_lastname = $this->sender_firstname ;
-        if($this->sender_middlename)
-            $this->sender_lastname = $this->sender_middlename ;
-        if($this->sender_lastname)
-            $this->sender_lastname = $this->sender_lastname ;
+        
+        if ($this->sender_middlename) {
+            $last_name = $this->sender_middlename;
+            if ($this->sender_lastname) {
+                $last_name = $last_name ." ". $this->sender_lastname;
+            }
+            if ($this->sender_lastname2) {
+                $last_name = $last_name ." ". $this->sender_lastname2;
+            }
+            if ($this->sender_lastname3) {
+                $last_name = $last_name ." ". $this->sender_lastname3;
+            }
+            if ($this->sender_lastname4) {
+                $last_name = $last_name ." ". $this->sender_lastname4;
+            }
+            $this->sender_lastname_php = $last_name ;
+        }
+        if($this->sender_lastname_php == "") {
+            if ($this->sender_firstname)
+                $this->sender_lastname_php = $this->sender_firstname;
+        }
 
+        $this->sender_lastname = $sender_fullname ;   //indo bank
 
         return $this;
     }
@@ -846,6 +973,15 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
         return $this->sender_phone;
     }
 
+    public function setSenderPostalCode($sender_postal_code){
+        $this->sender_postal_code = $sender_postal_code;
+    }
+    public function getSenderPostalCode(){
+
+      return $this->sender_postal_code ;
+    }
+
+
     public function setReceiverFullname($receiver_fullname)
     {
         $this->receiver_fullname = trim($receiver_fullname);
@@ -853,14 +989,34 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
         $this->receiver_firstname = isset($arrName[0]) ? $arrName[0] : '';
         $this->receiver_middlename = isset($arrName[1]) ? $arrName[1] : '';
         $this->receiver_lastname = isset($arrName[2]) ? $arrName[2] : '';
+        $this->receiver_lastname2 = isset($arrName[3]) ? $arrName[3] : '';
+        $this->receiver_lastname3 = isset($arrName[4]) ? $arrName[4] : '';
+        $this->receiver_lastname4 = isset($arrName[5]) ? $arrName[5] : '';
 
-        if($this->receiver_firstname)
-            $this->receiver_lastname = $this->receiver_firstname ;
-        if($this->receiver_middlename)
-            $this->receiver_lastname = $this->receiver_middlename ;
-        if($this->receiver_lastname)
-            $this->receiver_lastname = $this->receiver_lastname ;
+        
+        if ($this->receiver_middlename) {
+             $last_name = $this->receiver_middlename;
+             if ($this->receiver_lastname) {
+                 $last_name = $last_name ." ". $this->receiver_lastname;
+             }
+             if ($this->receiver_lastname2) {
+                 $last_name = $last_name ." ". $this->receiver_lastname2;
+             }
+             if ($this->receiver_lastname3) {
+                 $last_name = $last_name ." ". $this->receiver_lastname3;
+             }
+             if ($this->receiver_lastname4) {
+                 $last_name = $last_name ." ". $this->receiver_lastname4;
+             }
+             $this->receiver_lastname_php = $last_name ;
+        }
 
+        if($this->receiver_lastname_php == "") {
+            if ($this->receiver_firstname)
+                $this->receiver_lastname_php = $this->receiver_firstname;
+        }
+
+        $this->receiver_lastname = $receiver_fullname; //indo bank
 
         return $this;
     }
@@ -1087,7 +1243,7 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
     }
     public function setSenderDob($sender_dob)
     {
-        $this->sender_dob = $sender_dob;
+        $this->sender_dob = substr($sender_dob,0,10);
     }
 
     public function getSenderGender()
@@ -1098,7 +1254,7 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
     {
         //only for transfer to
         if($sender_gender == "F"){$sender_gender="Female";}
-        if($sender_gender == "M"){$sender_gender="Female";}
+        if($sender_gender == "M"){$sender_gender="Male";}
         $this->sender_gender = $sender_gender;
     }
 
@@ -1235,6 +1391,8 @@ class TransferToSwitchClient implements PaymentRequestClientInterface{
             'sender_host_countrycode' => $this->getSenderHostCountrycode(),
             'sender_host_identity' => $this->getSenderHostIdentity(),
             'sender_host_identitycard' => $this->getSenderHostIdentitycard(),
+            'sender_postal_code' => $this->getSenderPostalCode(),
+            'sender_id_type' => $this->getSenderIdType(),
 
             'account_holder_name' => $this->getReceiverFullname(),
             'receiver_fullname' => $this->getReceiverFullname(),

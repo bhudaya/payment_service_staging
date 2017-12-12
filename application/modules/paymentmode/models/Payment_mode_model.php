@@ -52,6 +52,9 @@ class payment_mode_model extends Base_Model implements IPaymentModeDataMapper{
 
         if( isset($data->delivery_time_name) )
             $entity->getDeliveryTime()->setDisplayName($data->delivery_time_name);
+        
+        if( isset($data->ss_supported_channel) )
+            $entity->setSSSupportedChannel($data->ss_supported_channel);
 
         if( isset($data->created_at) )
             $entity->setCreatedAt(IappsDateTime::fromUnix($data->created_at));
@@ -73,8 +76,8 @@ class payment_mode_model extends Base_Model implements IPaymentModeDataMapper{
 
         return $entity;
     }
-
-    public function findById($id, $deleted = false)
+    
+    protected function _select()
     {
         $this->db->select('pm.id as payment_mode_id,
                            pm.code,
@@ -90,12 +93,18 @@ class payment_mode_model extends Base_Model implements IPaymentModeDataMapper{
                            dt.id delivery_time_id,
                            dt.code delivery_time_code,
                            dt.display_name delivery_time_name,
+                           pm.ss_supported_channel,
                            pm.created_at,
                            pm.created_by,
                            pm.updated_at,
                            pm.updated_by,
                            pm.deleted_at,
                            pm.deleted_by');
+    }
+
+    public function findById($id, $deleted = false)
+    {
+        $this->_select();
         $this->db->from('iafb_payment.payment_mode pm');
         $this->db->join('iafb_payment.system_code usp', 'pm.payment_mode_group_id = usp.id');
         $this->db->join('iafb_payment.system_code_group uspg', 'usp.system_code_group_id = uspg.id');
@@ -121,26 +130,7 @@ class payment_mode_model extends Base_Model implements IPaymentModeDataMapper{
         $offset = ($page - 1) * $limit;
 
         $this->db->start_cache(); //to cache active record query
-        $this->db->select('pm.id as payment_mode_id,
-                           pm.code,
-                           pm.name,
-                           pm.self_service,
-                           pm.need_approval,
-                           pm.for_refund,
-                           pm.payment_mode_group_id,
-                           usp.code as payment_mode_group,
-                           usp.display_name as payment_mode_group_name,
-                           pm.is_payment_mode,
-                           pm.is_collection_mode,
-                           dt.id delivery_time_id,
-                           dt.code delivery_time_code,
-                           dt.display_name delivery_time_name,
-                           pm.created_at,
-                           pm.created_by,
-                           pm.updated_at,
-                           pm.updated_by,
-                           pm.deleted_at,
-                           pm.deleted_by');
+        $this->_select();
         $this->db->from('iafb_payment.payment_mode pm');
         $this->db->join('iafb_payment.system_code usp', 'pm.payment_mode_group_id = usp.id');
         $this->db->join('iafb_payment.system_code_group uspg', 'usp.system_code_group_id = uspg.id');
@@ -169,26 +159,7 @@ class payment_mode_model extends Base_Model implements IPaymentModeDataMapper{
         $offset = ($page - 1) * $limit;
 
         $this->db->start_cache(); //to cache active record query
-        $this->db->select('pm.id as payment_mode_id,
-                           pm.code,
-                           pm.name,
-                           pm.self_service,
-                           pm.need_approval,
-                           pm.for_refund,
-                           pm.payment_mode_group_id,
-                           usp.code as payment_mode_group,
-                           usp.display_name as payment_mode_group_name,
-                           pm.is_payment_mode,
-                           pm.is_collection_mode,
-                           dt.id delivery_time_id,
-                           dt.code delivery_time_code,
-                           dt.display_name delivery_time_name,
-                           pm.created_at,
-                           pm.created_by,
-                           pm.updated_at,
-                           pm.updated_by,
-                           pm.deleted_at,
-                           pm.deleted_by');
+        $this->_select();
         $this->db->from('iafb_payment.payment_mode pm');
         $this->db->join('iafb_payment.system_code usp', 'pm.payment_mode_group_id = usp.id');
         $this->db->join('iafb_payment.system_code_group uspg', 'usp.system_code_group_id = uspg.id');
@@ -231,26 +202,7 @@ class payment_mode_model extends Base_Model implements IPaymentModeDataMapper{
 
     public function findByFilters(PaymentModeCollection $filters)
     {
-        $this->db->select('pm.id as payment_mode_id,
-                           pm.code,
-                           pm.name,
-                           pm.self_service,
-                           pm.need_approval,
-                           pm.for_refund,
-                           pm.payment_mode_group_id,
-                           usp.code as payment_mode_group,
-                           usp.display_name as payment_mode_group_name,
-                           pm.is_payment_mode,
-                           pm.is_collection_mode,
-                           dt.id delivery_time_id,
-                           dt.code delivery_time_code,
-                           dt.display_name delivery_time_name,
-                           pm.created_at,
-                           pm.created_by,
-                           pm.updated_at,
-                           pm.updated_by,
-                           pm.deleted_at,
-                           pm.deleted_by');
+        $this->_select();
         $this->db->from('iafb_payment.payment_mode pm');
         $this->db->join('iafb_payment.system_code usp', 'pm.payment_mode_group_id = usp.id');
         $this->db->join('iafb_payment.system_code_group uspg', 'usp.system_code_group_id = uspg.id');
@@ -314,26 +266,7 @@ class payment_mode_model extends Base_Model implements IPaymentModeDataMapper{
 
     public function findByCode($code)
     {
-        $this->db->select('pm.id as payment_mode_id,
-                           pm.code,
-                           pm.name,
-                           pm.self_service,
-                           pm.need_approval,
-                           pm.for_refund,
-                           pm.payment_mode_group_id,
-                           usp.code as payment_mode_group,
-                           usp.display_name as payment_mode_group_name,
-                           pm.is_payment_mode,
-                           pm.is_collection_mode,
-                           dt.id delivery_time_id,
-                           dt.code delivery_time_code,
-                           dt.display_name delivery_time_name,
-                           pm.created_at,
-                           pm.created_by,
-                           pm.updated_at,
-                           pm.updated_by,
-                           pm.deleted_at,
-                           pm.deleted_by');
+        $this->_select();
         $this->db->from('iafb_payment.payment_mode pm');
         $this->db->join('iafb_payment.system_code usp', 'pm.payment_mode_group_id = usp.id');
         $this->db->join('iafb_payment.system_code_group uspg', 'usp.system_code_group_id = uspg.id');

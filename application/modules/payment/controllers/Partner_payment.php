@@ -6,11 +6,12 @@ use Iapps\PaymentService\Common\FunctionCode;
 use Iapps\Common\Microservice\AccountService\AccessType;
 use Iapps\PaymentService\Common\MessageCode;
 use Iapps\Common\Core\IpAddress;
-use Iapps\Common\Microservice\AccountService\SessionType;
+use Iapps\PaymentService\PaymentRequest\PaymentRequestStatus;
 use Iapps\PaymentService\Payment\PaymentRepository;
 use Iapps\Common\Core\IappsDateTime;
 use Iapps\PaymentService\Payment\PaymentService;
 use Iapps\PaymentService\Payment\Payment;
+use Iapps\Common\Helper\InputValidator;
 
 class Partner_payment extends Partner_Base_Controller{
 
@@ -138,6 +139,52 @@ class Partner_payment extends Partner_Base_Controller{
 
         $this->_respondWithCode(MessageCode::CODE_COUNTRY_CURRENCY_INVALID_PAYMENT_MODE, ResponseHeader::HEADER_NOT_FOUND);
         return false;
+    }
+    
+    public function updateCollection()
+    {
+        if( !$admin_id = $this->_getUserProfileId(FunctionCode::PARTNER_PAYMENT) )
+            return false;
+
+        if( !$this->is_required($this->input->post(), array('payment_request_id','payment_code', 'status')) )
+            return false;
+        
+        $v = new InputValidator();
+        $v->addAdditionalRules('in', 'status', array(PaymentRequestStatus::SUCCESS, PaymentRequestStatus::FAIL));
+        $v->addAdditionalRules('freeText', array('remarks'));
+        if( !$this->_validateInput($v) )
+            return false;
+
+        $payment_request_id = $this->input->post('payment_request_id');
+        $payment_code = $this->input->post('payment_code');
+        $user_profile_id = $this->input->post('user_profile_id') ? $this->input->post('user_profile_id') : null;
+        $status = $this->input->post('status');
+        $remarks = $this->input->post('remarks') ? $this->input->post('remarks') : null;        
+        
+        if( $status == PaymentRequestStatus::FAIL and  $remarks == NULL)
+        {            
+            $this->_response(InputValidator::constructInvalidParamResponse('missing remarks'));
+            return false;
+        }
+            
+        if( $payment_service = PaymentRequestServiceFactory::build($payment_code))
+        {
+            $payment_service->setUpdatedBy($admin_id);
+            $payment_service->setIpAddress(IpAddress::fromString($this->_getIpAddress()));
+            $payment_service->setAdminAccessToken($this->input->get_request_header(ResponseHeader::FIELD_X_AUTHORIZATION));
+   
+            if( $result =$payment_service->updateCollection($user_profile_id, $payment_request_id, $payment_code, $status, $remarks) )
+            {
+                $this->_respondWithSuccessCode($payment_service->getResponseCode(), array("result" => $result));
+                return true;
+            }
+
+            $this->_respondWithCode($payment_service->getResponseCode(), ResponseHeader::HEADER_NOT_FOUND, NULL, NULL, $payment_service->getResponseMessage());
+            return false;
+        }
+
+        $this->_respondWithCode(MessageCode::CODE_COUNTRY_CURRENCY_INVALID_PAYMENT_MODE, ResponseHeader::HEADER_NOT_FOUND);
+        return false;        
     }
 
     public function makePayment()

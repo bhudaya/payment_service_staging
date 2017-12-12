@@ -9,7 +9,15 @@ class CountryCurrencyRepository extends IappsBaseRepository{
 
     public function findByCode($code)
     {
-        return $this->getDataMapper()->findByCode($code);
+        $cacheKey = CacheKey::COUNTRY_CURRENCY_CODE . $code;
+        if( !$result = $this->getElasticCache($cacheKey) )
+        {
+            $result = $this->getDataMapper()->findByCode($code);
+            if( $result )
+                $this->setElasticCache($cacheKey, $result);
+        }
+        
+        return $result;
     }
 
     public function findByCountryCode($country_code)
@@ -44,7 +52,8 @@ class CountryCurrencyRepository extends IappsBaseRepository{
     
     protected function _removeCache(CountryCurrency $country_currency)
     {
-        $cacheKeys = array(CacheKey::COUNTRY_CURRENCY_ALL);
+        $cacheKeys = array(CacheKey::COUNTRY_CURRENCY_ALL,
+        CacheKey::COUNTRY_CURRENCY_CODE . $country_currency->getCode());
         
         foreach($cacheKeys AS $key)
             $this->deleteElastiCache($key);

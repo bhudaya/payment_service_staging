@@ -9,6 +9,7 @@ use Iapps\PaymentService\Attribute\AttributeCode;
 use Iapps\PaymentService\PaymentModeAttribute\PaymentModeAttributeServiceFactory;
 use Iapps\PaymentService\PaymentMode\PaymentModeType;
 use Iapps\PaymentService\Common\Logger;
+use Iapps\PaymentService\Common\TransferToSwitch\TransferToSwitchClientFactory;
 
 
 
@@ -29,12 +30,54 @@ class IndoBankCollectionInfoValidator extends CollectionInfoValidator{
                 else
                     $accountHolderName = NULL;
 
-                //check if bank code is covered by BNI
+                //transferto check account
+                //if($payment_code == PaymentModeType::BANK_TRANSFER_TRANSFERTO){
+
+                if($support = $this->_isBankSupportedByPaymentMode(PaymentModeType::BANK_TRANSFER_TRANSFERTO,$bank_code)){
+
+
+                    //return true;
+                    Logger::debug('Transfer-to Indo Bank Validation: ' . $bank_code);
+
+
+                    $client = TransferToSwitchClientFactory::build();
+                    if( !$response = $client->checkAccount($bank_code, $bank_account) )
+                    {
+                        $this->setResponseCode(MessageCode::CODE_CHECK_BANK_ACCOUNT_FAILED);
+                        return false;
+                    }
+
+                    if( $response->isSuccess() )
+                    {
+                        if( !is_null($accountHolderName) )
+                        {
+                            if(strtoupper($accountHolderName) == strtoupper($response->getDestAccHolder()) )
+                            {//it's ok
+                                return $result;
+                            }
+                            else
+                            {//no the name is not correct
+                                $this->setResponseCode(MessageCode::CODE_CHECK_ACCOUNT_HOLDER_NAME_FAILED);
+                                $this->setResponseMessage("Account holder name is invalid. Correct Name: '" . $response->getDestAccHolder() . "'");
+                                return false;
+                            }
+                        }
+                        else //it's valid
+                            return $result;
+                    }
+                    $this->setResponseCode(MessageCode::CODE_CHECK_BANK_ACCOUNT_FAILED);
+                    return false;
+                }
+
+
+
+                //check if bank code is covered by BNI or TMoney
                 if( $this->_isBankSupported($bank_code) )
                 {
-                    
+                    //set success
+                    //return true ;
 
-                    Logger::debug('Indo Bank Validation: ' . $bank_code);
+                    Logger::debug('BNI Bank Validation: ' . $bank_code);
                     $client = BNISwitchClientFactory::build();
                     if( !$response = $client->checkAccount($bank_code, $bank_account) )
                     {
@@ -85,6 +128,23 @@ class IndoBankCollectionInfoValidator extends CollectionInfoValidator{
         
         return false;
     }
+
+    protected function _isBankSupportedByPaymentMode($payment_mode,$bankCode)
+    {
+        //check if bank code is covered by payment mode
+        $pmAttServ = PaymentModeAttributeServiceFactory::build();
+        if( $pmAttr = $pmAttServ->getAttributesByPaymentCode($payment_mode, 'ID', false) )
+        {
+            if( $attr = $pmAttr->getByAttributeCode(AttributeCode::BANK_CODE) )
+            {
+                return $attr->getValue()->getByCode($bankCode);
+            }
+
+        }
+
+        return false;
+    }
+
 
     /*
      * if($response = $tmoney_switch_client->checkAccount($bank_code,$account_number) )

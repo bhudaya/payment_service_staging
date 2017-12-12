@@ -21,6 +21,8 @@ class BNISwitchResponse implements PaymentRequestResponseInterface{
     protected $response_code;
     protected $description;
     protected $bni_ref_no;
+    protected $dest_acc_holder;
+    protected $dest_bankacc;
    
 
     function __construct($response, $api_request)
@@ -91,7 +93,7 @@ class BNISwitchResponse implements PaymentRequestResponseInterface{
             $this->setResponseCode('PRC');
             $this->setDescription('Received timeout but pending confirmation from BNI');
             */
-            $this->setFormattedResponse(array('ERR'=>'timeout'));
+            $this->setFormattedResponse(array('resultCode'=>'PRC','resultDesc'=>'timeout'));
             //ERROR but make it processing
             $this->setResponseCode('PRC');
             $this->setDescription('Timeout from BNI');
@@ -103,7 +105,7 @@ class BNISwitchResponse implements PaymentRequestResponseInterface{
     public function setRaw($raw)
     {
         $this->raw = $raw;
-        $this->_extractResponse($raw);
+        $this->_extractResponse();
         return $this;
     }
 

@@ -17,7 +17,9 @@ use Iapps\PaymentService\Common\Logger;
 use Iapps\Common\Microservice\AccountService\AccountServiceFactory;
 use Iapps\Common\Core\IappsDateTime;
 use Iapps\PaymentService\Payment\PaymentServiceFactory;
-use Illuminate\Support\Facades\Log;
+use Iapps\PaymentService\Common\CoreConfigDataServiceFactory;
+use Iapps\PaymentService\Common\CoreConfigType;
+use Iapps\Common\CommunicationService\CommunicationServiceProducer;
 
 class TMoneyPaymentRequestService extends PaymentRequestService{
 
@@ -40,6 +42,39 @@ class TMoneyPaymentRequestService extends PaymentRequestService{
         }
 
         return false;
+    }
+
+    public function checkTmoneyServer(){
+        try{
+            $tmoney_switch_client = TMoneySwitchClientFactory::build();
+        }
+        catch(\Exception $e)
+        {//this is internal error, should not happen
+            $this->setResponseCode(MessageCode::CODE_INVALID_SWITCH_SETTING);
+            return false;
+        }
+        $response = $tmoney_switch_client->signIn() ;
+        if($response){
+            if ($response->getResponseCode() == "0"){
+                $resp_array = json_decode($response->getFormattedResponse(),true);
+                $result = "<p>TMoney Server Checking:</p>";
+                if(array_key_exists("resultCode",$resp_array)) {
+                    $result .= "<p>Result Code :" . $resp_array["resultCode"] . "</p>";
+                    $result .= "<p>Result Description :" . $resp_array["resultDesc"] . "</p>";
+                    $result .= "<p>Time Stamp :" . $resp_array["timeStamp"] . "</p>";
+                    $result .= "<p>Last Login :" . $resp_array["user"]["lastLogin"] . "</p>";
+                }
+
+                $this->_notifyServerCheck($result);
+                return true ;
+            }else{
+                $result = "<p>TMoney Server Checking:</p>";
+                $result .= "<p>" . $response->getFormattedResponse() . "</p>";
+                $this->_notifyServerCheck($result);
+                return false ;
+            }
+        }
+        return false ;
     }
 
     /*
@@ -165,10 +200,13 @@ class TMoneyPaymentRequestService extends PaymentRequestService{
             }else{
                 if($request->getStatus()==PaymentRequestStatus::FAIL){
                     $this->setResponseMessage($response->getDescription());
+                    $request->setFail();
+                    $this->getRepository()->updateResponse($request);
                     Logger::debug('TMoney Failed - ' . $request->getStatus() . ': ' . $response->getResponse() . ': ' . $tmoney_switch_client->getTmoneyInfo());
                 }
                 if($request->getStatus()==PaymentRequestStatus::PENDING){
                     $this->setResponseMessage($response->getDescription());
+                    $this->getRepository()->updateResponse($request);
                     Logger::debug('TMoney Pending - ' . $request->getStatus() . ': ' . $response->getResponse() . ': ' . $tmoney_switch_client->getTmoneyInfo());
                 }
             }
@@ -218,7 +256,7 @@ class TMoneyPaymentRequestService extends PaymentRequestService{
                         $ori_request = clone($request);
 
                         $result = $this->_checkResponse($request, $response);
-                        $this->getRepository()->startDBTransaction();
+                        $this->getRepository()->beginDBTransaction();
                         if ($result) {
 
                             if ($complete = parent::_completeAction($request)) {
@@ -228,11 +266,18 @@ class TMoneyPaymentRequestService extends PaymentRequestService{
                                 $request->setReferenceID($response->getRefNoSwitcher());
 
                                 if (parent::_updatePaymentRequestStatus($request, $ori_request)) {
-                                    $this->getRepository()->completeDBTransaction();
+                                    Logger::debug("TMoney reprocess Request Success");
+                                    Logger::debug($request->getTransactionID());
+
+                                    if ($this->getRepository()->statusDBTransaction() === FALSE){
+                                        $this->getRepository()->rollbackDBTransaction();
+                                    }else{
+                                        $this->getRepository()->commitDBTransaction();
+                                    }
                                     $this->setResponseCode(MessageCode::CODE_REQUEST_COMPLETED);
                                     return true;
                                 } else {
-                                    Logger::debug("reprocessRequest failed");
+                                    Logger::debug("TMoney reprocess Request failed");
                                     $this->getRepository()->rollbackDBTransaction();
                                     $this->setResponseCode(MessageCode::CODE_PAYMENT_REQUEST_FAIL); //***
                                     return false;
@@ -245,16 +290,23 @@ class TMoneyPaymentRequestService extends PaymentRequestService{
                             $request->getResponse()->add('tmoney_response', $response->getFormattedResponse());
                             $request->getResponse()->add('tmoney_process', $tmoney_switch_client->getTmoneyInfo());
 
-
                             if ($request->getStatus() == PaymentRequestStatus::FAIL) {
                                 $this->setResponseMessage($response->getRemarks());
                                 $request->setFail();
                                 $this->getRepository()->updateResponse($request);
-                                $this->getRepository()->completeDBTransaction();
+                                if ($this->getRepository()->statusDBTransaction() === FALSE){
+                                    $this->getRepository()->rollbackDBTransaction();
+                                }else {
+                                    $this->getRepository()->commitDBTransaction();
+                                }
                                 return true;
                             } elseif ($request->getStatus() == PaymentRequestStatus::PENDING) {
                                 $this->getRepository()->updateResponse($request);
-                                $this->getRepository()->completeDBTransaction();
+                                if ($this->getRepository()->statusDBTransaction() === FALSE){
+                                    $this->getRepository()->rollbackDBTransaction();
+                                }else {
+                                    $this->getRepository()->commitDBTransaction();
+                                }
                                 return false;
                             }
                         }
@@ -376,6 +428,26 @@ class TMoneyPaymentRequestService extends PaymentRequestService{
             return $result ;
         }
 
+        return false;
+    }
+
+
+    protected function _notifyServerCheck($result)
+    {
+        //get config data
+        $configServ = CoreConfigDataServiceFactory::build();
+        if( $email = $configServ->getConfig(CoreConfigType::TMONEY_SERVER_CHECK_EMAIL) )
+        {
+            $email = explode('|', $email);
+            $checkdate = date('Y-m-d H:i:s');
+            if( is_array($email) ) {
+                $subject = 'TMoney Server Checking '.$checkdate;
+                $content  = $result ;
+                $content .= "<p></p><p>Thank You</p>";
+                $ics = new CommunicationServiceProducer();
+                return $ics->sendEmail(getenv('ICS_PROJECT_ID'), $subject, $content, $content, $email);
+            }
+        }
         return false;
     }
 

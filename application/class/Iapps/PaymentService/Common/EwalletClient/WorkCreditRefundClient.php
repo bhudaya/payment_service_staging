@@ -2,15 +2,14 @@
 
 namespace Iapps\PaymentService\Common\EwalletClient;
 
-class EwalletCollectionClient extends EwalletClient{
-
-    protected $_requestUri = 'ewallet/collection/request';
-    protected $_cancelUri = 'ewallet/collection/cancel';
-    protected $_completeUri = 'ewallet/collection/complete';
+class WorkCreditRefundClient extends EwalletClient
+{
+    protected $_requestUri  = 'system/mainagent/workcredit/refund/request';
+    protected $_cancelUri   = 'system/mainagent/workcredit/refund/cancel';
+    protected $_completeUri = 'system/mainagent/workcredit/refund/complete';
 
     protected $user_profile_id;
     protected $is_collection = false; //default is refund
-    protected $is_investment_return = false; //default is refund
 
     public function setUserProfileId($user_id)
     {
@@ -22,7 +21,7 @@ class EwalletCollectionClient extends EwalletClient{
     {
         return $this->user_profile_id;
     }
-
+    
     public function setIsCollection($is_collection)
     {
         $this->is_collection = $is_collection;
@@ -32,17 +31,6 @@ class EwalletCollectionClient extends EwalletClient{
     public function getIsCollection()
     {
         return $this->is_collection;
-    }
-
-    public function setIsInvestmentReturn($is_investment_return)
-    {
-        $this->is_investment_return = $is_investment_return;
-        return $this;
-    }
-
-    public function getIsInvestmentReturn()
-    {
-        return $this->is_investment_return;
     }
 
     public function request()
@@ -55,8 +43,7 @@ class EwalletCollectionClient extends EwalletClient{
                              'transactionID' => $this->getTransactionID(),
                              'country_currency_code' => $this->getCountryCurrencyCode(),
                              'amount' => $this->getAmount(),
-                             'is_collection' => $this->getIsCollection(),
-                             'is_investment_return' => $this->getIsInvestmentReturn() ),
+                             'is_collection' => $this->getIsCollection()),
             'header' => $this->_getHeaders()
         );
 
@@ -76,9 +63,9 @@ class EwalletCollectionClient extends EwalletClient{
         $option = array(
             'method' => 'post',
             'uri' => $this->_cancelUri,
-            'param' => array('request_token' => $this->getToken(),
-                             'is_collection' => $this->getIsCollection(),
-                             'is_investment_return' => $this->getIsInvestmentReturn()),
+            'param' => array('user_profile_id' => $this->getUserProfileId(),
+                            'request_token' => $this->getToken(),
+                            'is_collection' => $this->getIsCollection()),
             'header' => $this->_getHeaders()
         );
 
@@ -97,9 +84,9 @@ class EwalletCollectionClient extends EwalletClient{
         $option = array(
             'method' => 'post',
             'uri' => $this->_completeUri,
-            'param' => array('request_token' => $this->getToken(),
-                             'is_collection' => $this->getIsCollection(),
-                             'is_investment_return' => $this->getIsInvestmentReturn()),
+            'param' => array('user_profile_id' => $this->getUserProfileId(),
+                            'request_token' => $this->getToken(),
+                            'is_collection' => $this->getIsCollection()),
             'header' => $this->_getHeaders()
         );
 

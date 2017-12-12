@@ -81,6 +81,19 @@ class EWalletPaymentRequestService extends PaymentRequestService{
         return false;
     }
 
+    protected function _isInvestmentReturnRequest(PaymentRequest $request)
+    {
+        $option = $request->getOption();
+
+        if( $isInvestmentReturn = $option->getValue('is_investment_return') )
+        {
+            if( $isInvestmentReturn == 1)
+                return true;
+        }
+
+        return false;
+    }
+
     protected function _requestAction(PaymentRequest $request)
     {
         //make request to ewallet service
@@ -93,6 +106,9 @@ class EWalletPaymentRequestService extends PaymentRequestService{
 
         if( $this->_isCollectionRequest($request) )
             $client->setIsCollection(true);
+
+        if( $this->_isInvestmentReturnRequest($request) )
+            $client->setIsInvestmentReturn(true);
 
         $response = $client->request();
 
@@ -129,6 +145,9 @@ class EWalletPaymentRequestService extends PaymentRequestService{
         if( $this->_isCollectionRequest($request) )
             $client->setIsCollection(true);
 
+        if( $this->_isInvestmentReturnRequest($request) )
+            $client->setIsInvestmentReturn(true);
+
         if( $client->cancel() )
         {
             return true;
@@ -152,6 +171,9 @@ class EWalletPaymentRequestService extends PaymentRequestService{
         $client->setToken($request->getReferenceID());
         if( $this->_isCollectionRequest($request) )
             $client->setIsCollection(true);
+
+        if( $this->_isInvestmentReturnRequest($request) )
+            $client->setIsInvestmentReturn(true);
 
         if( $client->complete() )
         {

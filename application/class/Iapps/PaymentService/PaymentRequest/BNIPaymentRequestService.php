@@ -135,14 +135,22 @@ class BNIPaymentRequestService extends PaymentRequestService{
             return false;
         }
 
-        if($response = $bni_switch_client->bankTransfer() )
+        $bni_switch_client->setResponseFields($request->getResponse()->toArray());
+
+        $response = $bni_switch_client->bankTransfer() ;
+        $request->getResponse()->setJson(json_encode(array("BNI Bank Transfer"=>$bni_switch_client->getTransactionType())));
+
+        if($response)
         {
 
             $result = $this->_checkResponse($request, $response);
-            $request->getResponse()->setJson(json_encode(array("BNI Bank Transfer"=>$bni_switch_client->getTransactionType())));
-
             $request->getResponse()->add('bni_response', $response->getFormattedResponse());
+            $request->getResponse()->add('bni_process', $bni_switch_client->getBniInfo());
             $request->getResponse()->add('bni_trx_date', $bni_switch_client->getTransDateBni());
+
+            $request->getResponse()->add('bni_response_code', $response->getResponseCode());
+            $request->getResponse()->add('bni_response_desc', $response->getDescription());
+
 
             $request->setReferenceID($bni_switch_client->getReferenceNo());
 
@@ -181,48 +189,73 @@ class BNIPaymentRequestService extends PaymentRequestService{
             return false;
         }
 
+        //get last info
+        $bni_switch_client->setResponseFields($request->getResponse()->toArray());
+        $last_response = $request->getResponse()->toArray() ;
 
-        if($response = $bni_switch_client->inquiry() ) {
-            $ori_request = clone($request);
+        if(array_key_exists("bni_response",$last_response)) {
 
+                $bni_response = $last_response["bni_response"];
+                $bni_response_arr = json_decode($bni_response,true) ;
+            
+                $bni_response_code="";
+                if(array_key_exists("bni_response_code",$last_response)) {
+                    $bni_response_code = $last_response["bni_response_code"];
+                }
+                //if ($bni_response_arr["resultCode"] == "PRC" ) {
+                if ($bni_response_code == "PRC" ) {
 
-            $result = $this->_checkResponse($request, $response);
+                    if ($response = $bni_switch_client->bankTransfer()) {
+                        $ori_request = clone($request);
 
-            $this->getRepository()->startDBTransaction();
-            if ($result) {
-                if ($complete = parent::_completeAction($request)) {
-                    $request->getResponse()->setJson(json_encode(array("reprocess"=>$bni_switch_client->getTransactionType())));
-                    $request->getResponse()->add('bni_response', $response->getFormattedResponse());
-                    $request->setReferenceID($response->getInvoiceNo());
+                        $result = $this->_checkResponse($request, $response);
+                        $this->getRepository()->beginDBTransaction();
 
-                    if (parent::_updatePaymentRequestStatus($request, $ori_request)) {
-                        $this->getRepository()->completeDBTransaction();
-                        $this->setResponseCode(MessageCode::CODE_REQUEST_COMPLETED);
-                        return true;
-                    } else {
-                        Logger::debug("reprocessRequest failed");
+                        $request->getResponse()->setJson(json_encode(array("BNI Bank Transfer" => $bni_switch_client->getTransactionType())));
+                        $request->getResponse()->add('bni_response', $response->getFormattedResponse());
+                        $request->getResponse()->add('bni_process', $bni_switch_client->getBniInfo());
+                        $request->getResponse()->add('bni_response_code', $response->getResponseCode());
+                        $request->getResponse()->add('bni_response_desc', $response->getDescription());
+                        if ($result) {
+
+                            if ($complete = parent::_completeAction($request)) {
+                                
+                                $request->setReferenceID($bni_switch_client->getReferenceNoBni());
+
+                                if (parent::_updatePaymentRequestStatus($request, $ori_request)) {
+                                    $this->getRepository()->commitDBTransaction();
+                                    $this->setResponseCode(MessageCode::CODE_REQUEST_COMPLETED);
+                                    return true;
+                                } else {
+                                    Logger::debug("reprocessRequest failed");
+                                    $this->getRepository()->rollbackDBTransaction();
+                                    $this->setResponseCode(MessageCode::CODE_PAYMENT_REQUEST_FAIL); //***
+                                    return false;
+                                }
+                            }
+                        } else {//failed or still processing
+
+                            if ($request->getStatus() == PaymentRequestStatus::FAIL) {
+                                $this->setResponseMessage($response->getRemarks());
+                                $request->setFail();
+                                $this->getRepository()->updateResponse($request);
+                                $this->getRepository()->commitDBTransaction();
+                                return true;
+                            } elseif ($request->getStatus() == PaymentRequestStatus::PENDING) {
+                                $this->getRepository()->updateResponse($request);
+                                $this->getRepository()->commitDBTransaction();
+                                return false;
+                            }
+                        }
                         $this->getRepository()->rollbackDBTransaction();
-                        $this->setResponseCode(MessageCode::CODE_PAYMENT_REQUEST_FAIL); //***
-                        return false;
+
+
                     }
                 }
-            } else {//failed or still processing
-                $request->getResponse()->setJson(json_encode(array("reprocess"=>$bni_switch_client->getTransactionType())));
-                $request->getResponse()->add('bni_response', $response->getFormattedResponse());
-                if ($request->getStatus() == PaymentRequestStatus::FAIL) {
-                    $this->setResponseMessage($response->getRemarks());
-                    $request->setFail();
-                    $this->getRepository()->updateResponse($request);
-                    $this->getRepository()->completeDBTransaction();
-                    return true;
-                }elseif (in_array($response->getResponseStatus(), array(BNISwitchFunction::BNI_STATUS_OUTSTANDING, BNISwitchFunction::BNI_STATUS_INPROCESS))) {
-                    $this->getRepository()->updateResponse($request);
-                    $this->getRepository()->completeDBTransaction();
-                    return false;
-                }
-            }
+
+
         }
-        $this->getRepository()->rollbackDBTransaction();
+        $this->setResponseCode(MessageCode::CODE_PAYMENT_REQUEST_FAIL);
         return false;
     }
 
@@ -243,7 +276,7 @@ class BNIPaymentRequestService extends PaymentRequestService{
             return false;
         }
 
-
+        
         if($response = $bni_switch_client->inquiry() ) {
            if (!$response->getResponseCode() == '0') {
                 return false;

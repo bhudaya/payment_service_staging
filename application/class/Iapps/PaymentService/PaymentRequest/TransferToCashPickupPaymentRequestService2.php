@@ -95,6 +95,11 @@ class TransferToCashPickupPaymentRequestService2 extends PaymentRequestService{
             $TransferTo_switch_client->setSenderPhone($sender_phone);
         if( $sender_fullname = $request->getOption()->getValue('sender_fullname') )
             $TransferTo_switch_client->setSenderFullname($sender_fullname);
+        if( $sender_postal_code= $request->getOption()->getValue('sender_postal_code') )
+            $TransferTo_switch_client->setSenderPostalCode($sender_postal_code);
+        if( $sender_id_type= $request->getOption()->getValue('sender_id_type') )
+            $TransferTo_switch_client->setSenderIdType($sender_id_type);
+        
         if( $receiver_address = $request->getOption()->getValue('receiver_address') )
             $TransferTo_switch_client->setReceiverAddress($receiver_address);
         if( $receiver_mobile_phone = $request->getOption()->getValue('receiver_mobile_phone') )
@@ -176,16 +181,20 @@ class TransferToCashPickupPaymentRequestService2 extends PaymentRequestService{
             $request->getResponse()->add('transferto_response', $response->getFormattedResponse());
             $request->getResponse()->add('transferto_process', $transferto_switch_client->getTransfertoInfo());
 
+            $request->setReferenceID($response->getTransactionIDSwitcher());
             if( $result ) {
                 $request->setReferenceID($response->getTransactionIDSwitcher());
                 return parent::_completeAction($request);
             }else{
                 if($request->getStatus()==PaymentRequestStatus::FAIL){
                     $this->setResponseMessage($response->getDescription());
+                    $request->setFail();
+                    $this->getRepository()->updateResponse($request);
                     Logger::debug('Transferto Failed - ' . $request->getStatus() . ': ' . $response->getResponse() . ': ' . $transferto_switch_client->getTransfertoInfo());
                 }
                 if($request->getStatus()==PaymentRequestStatus::PENDING){
                     $this->setResponseMessage($response->getDescription());
+                    $this->getRepository()->updateResponse($request);
                     Logger::debug('Transferto Pending - ' . $request->getStatus() . ': ' . $response->getResponse() . ': ' . $transferto_switch_client->getTransfertoInfo());
                 }
             }
@@ -202,6 +211,15 @@ class TransferToCashPickupPaymentRequestService2 extends PaymentRequestService{
     public function findPendingRequest(){
         $payment_request = new PaymentRequest();
         $payment_request->setPending();
+        $payment_request->setPaymentCode($this->getPaymentCode());
+        $requests = $this->getRepository()->findBySearchFilter($payment_request, null, null, null);
+
+        return $requests;
+    }
+
+    public function findPendingCollectionRequest(){
+        $payment_request = new PaymentRequest();
+        $payment_request->setPendingCollection();
         $payment_request->setPaymentCode($this->getPaymentCode());
         $requests = $this->getRepository()->findBySearchFilter($payment_request, null, null, null);
 
@@ -230,26 +248,33 @@ class TransferToCashPickupPaymentRequestService2 extends PaymentRequestService{
 
             if(array_key_exists("status",$transferto_response_arr)) {
 
-                if ($transferto_response_arr["status"] == "PRC" || $transferto_response_arr["status"] == "20000") {
+                if ($transferto_response_arr["status"] == "PRC" || $transferto_response_arr["status"] == "20000"  || $transferto_response_arr["status"] == "50000" || $transferto_response_arr["status"] == "60000") {
                     if ($response = $transferto_switch_client->bankTransfer()) {
                         $ori_request = clone($request);
 
                         $result = $this->_checkResponse($request, $response);
-                        $this->getRepository()->startDBTransaction();
+                        $this->getRepository()->beginDBTransaction();                        
+                        
                         if ($result) {
 
                             if ($complete = parent::_completeAction($request)) {
-                                $request->getResponse()->setJson(json_encode(array("TMoney Bank Transfer" => $transferto_switch_client->getTransactionType())));
+                                $request->getResponse()->setJson(json_encode(array("Transferto Bank Transfer" => $transferto_switch_client->getTransactionType())));
                                 $request->getResponse()->add('transferto_response', $response->getFormattedResponse());
                                 $request->getResponse()->add('transferto_process', $transferto_switch_client->getTransfertoInfo());
-                                $request->setReferenceID($response->getRefNoSwitcher());
+                                $request->setReferenceID($response->getTransactionIDSwitcher());
 
                                 if (parent::_updatePaymentRequestStatus($request, $ori_request)) {
-                                    $this->getRepository()->completeDBTransaction();
+                                    Logger::debug("Transfer-to CP2 reprocess Request Success");
+                                    Logger::debug($request->getTransactionID());
+                                    if ($this->getRepository()->statusDBTransaction() === FALSE){
+                                        $this->getRepository()->rollbackDBTransaction();
+                                    }else {
+                                        $this->getRepository()->commitDBTransaction();
+                                    }
                                     $this->setResponseCode(MessageCode::CODE_REQUEST_COMPLETED);
                                     return true;
                                 } else {
-                                    Logger::debug("reprocessRequest failed");
+                                    Logger::debug("Transfer-to CP2 reprocess failed");
                                     $this->getRepository()->rollbackDBTransaction();
                                     $this->setResponseCode(MessageCode::CODE_PAYMENT_REQUEST_FAIL); //***
                                     return false;
@@ -257,21 +282,43 @@ class TransferToCashPickupPaymentRequestService2 extends PaymentRequestService{
                             }
                         } else {//failed or still processing
 
-                            $request->getResponse()->setJson(json_encode(array("TMoney Bank Transfer" => $transferto_switch_client->getTransactionType())));
+                            $request->getResponse()->setJson(json_encode(array("Transferto Bank Transfer" => $transferto_switch_client->getTransactionType())));
                             $request->getResponse()->add('transferto_response', $response->getFormattedResponse());
                             $request->getResponse()->add('transferto_process', $transferto_switch_client->getTransfertoInfo());
-
 
                             if ($request->getStatus() == PaymentRequestStatus::FAIL) {
                                 $this->setResponseMessage($response->getRemarks());
                                 $request->setFail();
                                 $this->getRepository()->updateResponse($request);
-                                $this->getRepository()->completeDBTransaction();
+                                if ($this->getRepository()->statusDBTransaction() === FALSE){
+                                    $this->getRepository()->rollbackDBTransaction();
+                                }else {
+                                    $this->getRepository()->commitDBTransaction();
+                                } 
+                                
                                 return true;
                             } elseif ($request->getStatus() == PaymentRequestStatus::PENDING) {
-                                $this->getRepository()->updateResponse($request);
-                                $this->getRepository()->completeDBTransaction();
-                                return false;
+
+                                if($ori_request->getStatus() == PaymentRequestStatus::PENDING){
+                                    if( $response->getPayerTransactionCode()){
+                                        $request->setPendingCollection();     //set to pending collection
+                                        $this->getRepository()->updateResponse($request);
+                                        if ($this->getRepository()->statusDBTransaction() === FALSE){
+                                            $this->getRepository()->rollbackDBTransaction();
+                                        }else {
+                                            $this->getRepository()->commitDBTransaction();
+                                        }
+                                        return true;    //true/false to publishPaymentRequestChanged
+                                    }else{
+                                        $this->getRepository()->updateResponse($request);
+                                        if ($this->getRepository()->statusDBTransaction() === FALSE){
+                                            $this->getRepository()->rollbackDBTransaction();
+                                        }else {
+                                            $this->getRepository()->commitDBTransaction();
+                                        }
+                                        return false;
+                                    }      
+                                }
                             }
                         }
                         $this->getRepository()->rollbackDBTransaction();

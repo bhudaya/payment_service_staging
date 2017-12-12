@@ -31,5 +31,18 @@ class TransfertoCp2RetryTransactionService extends IappsBasicBaseService{
                 $i++;
             }
         }
+        $i = 0;
+        if ($requests = $paymentRequestServ->findPendingCollectionRequest()){
+            foreach ($requests->result as $req) {
+                if ($req instanceof PaymentRequest) {
+                    if ($response = $paymentRequestServ->reprocessRequest($req)) {
+                        PaymentEventProducer::publishPaymentRequestChanged($req->getModuleCode(), $req->getTransactionID(), $req->getPaymentCode());
+                    }
+                }
+                $i++;
+            }
+        }
+
+
     }
 }

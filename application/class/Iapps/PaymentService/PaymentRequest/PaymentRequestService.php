@@ -96,6 +96,8 @@ abstract class PaymentRequestService extends IappsBaseService{
         $request->setCreatedBy($this->getUpdatedBy());
         $request->getOption()->setArray($option);
         $request->setChannelId(PaymentRequestStaticChannel::$channelID);
+        
+        $this->_request = $request;
         if( $this->_requestAction($request) )
         {
             $v = PaymentRequestValidatorFactory::build($this->getPaymentCode(), $request);
@@ -129,24 +131,21 @@ abstract class PaymentRequestService extends IappsBaseService{
         {
             if( $this->_request instanceof PaymentRequest )
             {
-                if( $this->_request->getStatus() != PaymentRequestStatus::PENDING )
-                {
-                    $this->setResponseCode(MessageCode::CODE_REQUEST_IS_ALREADY_PROCESSED);
+                if( $response )
+                    $this->_request->getResponse()->add('external_response', json_encode($response));
+                
+                if( !$this->_validateComplete($this->_request) )
                     return false;
-                }
-
+                
                 $ori_request = clone($this->_request);
                 if( $this->_request->getUserProfileId() == $user_profile_id AND
                     $this->_request->getPaymentCode() == $payment_code )
                 {
                     if( $this->_request->setSuccess() )
-                    {
+                    {                                                
                         $this->getRepository()->startDBTransaction();
                         if( $this->_completeAction($this->_request) )
-                        {
-                            if( $response )
-                                $this->_request->getResponse()->add('external_response', json_encode($response));
-
+                        {                            
                             if( $this->_updatePaymentRequestStatus($this->_request, $ori_request))
                             {
                                 $this->getRepository()->completeDBTransaction();
@@ -164,10 +163,9 @@ abstract class PaymentRequestService extends IappsBaseService{
                             }
                         }
                         else
-                        {
-                            //failed or still processing
+                        {//failed or still processing               
                             $returnResult = false;
-                            if($this->_request->getStatus()==PaymentRequestStatus::PENDING){
+                            if( in_array($this->_request->getStatus(), array(PaymentRequestStatus::PENDING, PaymentRequestStatus::PENDING_COLLECTION)) ){
                                 $this->setResponseCode(MessageCode::CODE_PAYMENT_REQUEST_PENDING);
                                 $paymentInfoFields = array('id', 'module_code', 'transactionID','payment_code', 'country_currency_code', 'amount', 'status', 'description1', 'description2');
                                 $payment_info = array();
@@ -176,7 +174,8 @@ abstract class PaymentRequestService extends IappsBaseService{
                                 }
                                 $returnResult = array(
                                     'payment_info' => $payment_info,
-                                    'additional_info' => 'Processing'
+                                    'additional_info' => 'Processing',
+                                    'payment_request' => $this->_request->getSelectedField(array('id', 'module_code', 'transactionID', 'payment_code', 'country_currency_code', 'amount', 'status'))
                                 );
                             }else{
                                 $this->_request->setFail();
@@ -202,6 +201,12 @@ abstract class PaymentRequestService extends IappsBaseService{
         return false;
     }
 
+    public function updateCollection($user_profile_id, $request_id, $payment_code, $status, $remarks)
+    {
+        $this->setResponseCode(MessageCode::CODE_PAYMENT_REQUEST_FAIL);
+        return false;
+    }
+    
     public function cancel($user_profile_id, $request_id, $payment_code)
     {
         if( $request = $this->getRepository()->findById($request_id) )
@@ -290,6 +295,17 @@ abstract class PaymentRequestService extends IappsBaseService{
         return false;
     }
 
+    protected function _validateComplete(PaymentRequest $request)
+    {
+        if( $this->_request->getStatus() != PaymentRequestStatus::PENDING )
+        {
+            $this->setResponseCode(MessageCode::CODE_REQUEST_IS_ALREADY_PROCESSED);
+            return false;
+        }
+        
+        return true;
+    }
+    
     protected function _cancelAction(PaymentRequest $request)
     {
         return true;

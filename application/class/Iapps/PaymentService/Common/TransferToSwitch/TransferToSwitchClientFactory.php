@@ -69,13 +69,18 @@ class TransferToSwitchClientFactory{
         if( isset($option['sender_gender']) )
             $client->setSenderGender($option['sender_gender']);
         if( isset($option['sender_nationality']) )
-            $client->setSenderDob($option['sender_nationality']);
+            $client->setSenderNationality($option['sender_nationality']);
         if( isset($option['sender_host_countrycode']) )
-            $client->setSenderDob($option['sender_host_countrycode']);
+            $client->setSenderHostCountrycode($option['sender_host_countrycode']);
         if( isset($option['sender_host_identity']) )
-            $client->setSenderDob($option['sender_host_identity']);
+            $client->setSenderHostIdentity($option['sender_host_identity']);
         if( isset($option['sender_host_identitycard']) )
-            $client->setSenderDob($option['sender_host_identitycard']);
+            $client->setSenderHostIdentitycard($option['sender_host_identitycard']);
+        if( isset($option['sender_postal_code']) )
+            $client->setSenderPostalCode($option['sender_postal_code']);
+        if( isset($option['sender_id_type']) )
+            $client->setSenderIdType($option['sender_id_type']);
+        
 
         if( isset($option['receiver_full_name']) )
             $client->setReceiverFullname($option['receiver_full_name']);

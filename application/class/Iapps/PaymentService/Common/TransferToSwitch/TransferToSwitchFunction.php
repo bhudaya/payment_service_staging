@@ -13,6 +13,12 @@ class TransferToSwitchFunction {
     CONST VIETNAM_CP                          = 'CP3';
     CONST PHILIPPINES_CP_BANK_CODE            = '399';
     CONST VIETNAM_CP_BANK_CODE                = '';
+    CONST BANK_TRANSFER_TT1                   = 'TT1';
+    CONST PHILIPPINES_CP_BANK_CODE_PROD       = '194';
+    CONST VIETNAM_CP_BANK_CODE_PROD           = '';
+
+
+
 
 
 }

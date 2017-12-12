@@ -24,6 +24,20 @@ class PaymentModeRepository extends IappsBaseRepository{
 
     public function findAll($limit, $page)
     {
+        if( $limit == MAX_VALUE AND $page == 1)
+        {
+            $cacheKey = CacheKey::PAYMENT_MODE_ALL;
+        
+            if( !$result = $this->getElasticCache($cacheKey) )
+            {
+                $result = $this->getDataMapper()->findAll($limit, $page);
+                if( $result )
+                    $this->setElasticCache($cacheKey, $result);
+            }
+
+            return $result;        
+        }
+            
         return $this->getDataMapper()->findAll($limit, $page);
     }
 

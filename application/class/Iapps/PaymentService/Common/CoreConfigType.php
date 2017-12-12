@@ -35,7 +35,12 @@ class CoreConfigType
     const TRANSFERTO_SWITCH_USERNAME = 'transferto_switch_username';
     const TRANSFERTO_SWITCH_PASSWORD = 'transferto_switch_password';
     const TRANSFERTO_SWITCH_BEARER = 'transferto_switch_bearer';
+    const TRANSFERTO_INTERFACE_EMAIL = 'transferto_interface_email';
+    const TRANSFERTO_INTERFACE_OUT_PATH = 'transferto_interface_out_path';
+    const TRANSFERTO_INTERFACE_IN_PATH = 'transferto_interface_in_path';
+    const TRANSFERTO_REPORT_FILE = 'transferto_report_file';
 
+    const TMONEY_SERVER_CHECK_EMAIL = 'tmoney_server_check_email';
 
 
 }

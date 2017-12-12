@@ -3,7 +3,6 @@
 
 use Iapps\PaymentService\PaymentRequest\PaymentRequestServiceFactory;
 use Iapps\Common\Helper\ResponseHeader;
-use Iapps\Common\Microservice\AccountService\AccessType;
 use Iapps\PaymentService\Common\MessageCode;
 use Iapps\Common\Core\IpAddress;
 use Iapps\Common\Microservice\AccountService\SessionType;
@@ -15,6 +14,7 @@ use Iapps\PaymentService\Payment\PaymentUserType;
 use Iapps\PaymentService\PaymentRequest\PaymentRequestClient;
 use Iapps\PaymentService\PaymentRequest\PaymentRequestStaticChannel;
 use Iapps\PaymentService\Common\ChannelType;
+use Iapps\PaymentService\Payment\AgentPaymentListService;
 
 class Agent_payment extends Agent_Base_Controller{
 
@@ -197,7 +197,48 @@ class Agent_payment extends Agent_Base_Controller{
         return false;
     }
 
- //agent app   
+    /*
+     * This will get agent own list + user list by the agent
+     */
+    public function getList()
+    {
+        if(!$agent_id = $this->_getUserProfileId())
+            return false;
+        
+        $limit = $this->_getLimit();
+        $page = $this->_getPage();
+
+        $date_from = $this->_getDateFrom();
+        $date_to = $this->_getDateTo();
+        $transactionID = $this->input->get('transactionID') ? $this->input->get('transactionID') : NULL;
+        $module_code = $this->input->get('module_code') ? $this->input->get('module_code') : NULL;
+        $payment_code = $this->input->get('payment_code') ? $this->input->get('payment_code') : NULL;
+        
+        $paymentListServ = new AgentPaymentListService();
+        $paymentListServ->addUserProfileId($agent_id);
+        if( $date_from instanceof IappsDateTime)
+            $paymentListServ->getSelector ()->greaterAndEqualThan('created_at', $date_from->getUnix());
+        if( $date_to instanceof IappsDateTime)
+            $paymentListServ->getSelector ()->lesserAndEqualThan('created_at', $date_to->getUnix());            
+        if( $transactionID )
+            $paymentListServ->getSelector()->equals('transactionID', $transactionID);
+        if( $module_code )
+            $paymentListServ->getSelector()->equals('module_code', $module_code);
+        if( $payment_code )
+            $paymentListServ->getSelector()->equals('payment_code', $payment_code);
+
+        $paymentListServ->getSelector()->limit($limit, $page);
+        if( $list = $paymentListServ->getList() )
+        {
+            $this->_respondWithSuccessCode($paymentListServ->getResponseCode(), array('result' => $list->getResult(), 'total' => $list->getTotal()));
+            return true;
+        }
+        
+        $this->_respondWithCode($paymentListServ->getResponseCode(), ResponseHeader::HEADER_NOT_FOUND);
+        return false;
+    }
+
+    //agent app   
      public function getPaymentByCreator()
      {
          if (!$agent_id = $this->_getUserProfileId(NULL, NULL, NULL))

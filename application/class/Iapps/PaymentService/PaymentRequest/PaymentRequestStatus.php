@@ -8,4 +8,6 @@ class PaymentRequestStatus{
     const SUCCESS = 'success';
     const FAIL = 'fail';
     const CANCELLED = 'cancelled';
+    const PENDING_COLLECTION = 'pending_collection';
+
 }

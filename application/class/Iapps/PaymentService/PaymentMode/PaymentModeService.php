@@ -15,6 +15,9 @@ use Iapps\PaymentService\Common\FunctionCode;
 use Iapps\PaymentService\Common\PaymentDirection;
 use Iapps\Common\Microservice\AccountService\AccountServiceFactory;
 use Iapps\PaymentService\PaymentModeAttribute\PaymentModeAttributeServiceFactory;
+use Iapps\Common\Helper\RequestHeader;
+use Iapps\Common\Helper\ResponseHeader;
+use Iapps\Common\Core\PaginatedResult;
 
 class PaymentModeService extends IappsBaseService{
 
@@ -189,6 +192,11 @@ class PaymentModeService extends IappsBaseService{
         return false;
     }
 
+    public function getAllPaymentMode($limit = MAX_VALUE, $page = 1)
+    {
+        return $this->getRepository()->findAll($limit, $page);
+    }
+    
     public function getPaymentModeInfo($code)
     {
         if( $paymentModeInfo = $this->getRepository()->findByCode($code) )
@@ -218,43 +226,36 @@ class PaymentModeService extends IappsBaseService{
         $this->setResponseCode(MessageCode::CODE_GET_PAYMENT_MODE_FAILED);
         return false;
     }
-
-
-    public function getSupportedPaymentModeByFunction($access_token, $direction, $access_type = NULL)
+    
+    public function getRefundPaymentMode()
     {
-        $payment_mode_arr = array();
-
-        $account_serv = AccountServiceFactory::build();
-
-        if ($direction == PaymentDirection::IN) {
-            if ($account_serv->checkAccess($access_token, FunctionCode::COUNTER_CASHIN, $access_type)) {
-                $payment_mode_arr = array(PaymentModeType::STORE_CASH, PaymentModeType::EWALLET);
-            } else if ($account_serv->checkAccess($access_token, FunctionCode::MOBILE_CASHIN, $access_type)) {
-                $payment_mode_arr = array(PaymentModeType::MOBILE_AGENT_CASH, PaymentModeType::EWALLET);
-            } else if ($account_serv->checkAccess($access_token, FunctionCode::ADMIN_PAYMENT_IN, $access_type)) {
-                $payment_mode_arr = array(PaymentModeType::ADMIN_CASH);
-            } else if ($account_serv->checkAccess($access_token, FunctionCode::PARTNER_PAYMENT_IN, $access_type)) {
-                $payment_mode_arr = array(PaymentModeType::PARTNER_CASH);
-            } else if ($account_serv->checkAccess($access_token, FunctionCode::FRANCHISE_CASHIN, $access_type)) {
-                $payment_mode_arr[] = PaymentModeType::FRANCHISE_CASH;
-            }
-        } else if ($direction == PaymentDirection::OUT) {
-            if ($account_serv->checkAccess($access_token, FunctionCode::COUNTER_CASHOUT, $access_type)) {
-                $payment_mode_arr[] = PaymentModeType::STORE_CASH;
-            } else if ($account_serv->checkAccess($access_token, FunctionCode::MOBILE_CASHOUT, $access_type)) {
-                $payment_mode_arr[] = PaymentModeType::MOBILE_AGENT_CASH;
-            } else if ($account_serv->checkAccess($access_token, FunctionCode::ADMIN_PAYMENT_OUT, $access_type)) {
-                $payment_mode_arr = array(PaymentModeType::ADMIN_CASH);
-            } else if ($account_serv->checkAccess($access_token, FunctionCode::PARTNER_PAYMENT_OUT, $access_type)) {
-                $payment_mode_arr = array(PaymentModeType::PARTNER_CASH);
-            } else if ($account_serv->checkAccess($access_token, FunctionCode::FRANCHISE_CASHOUT, $access_type)) {
-                $payment_mode_arr = array(PaymentModeType::FRANCHISE_CASH);
-            }
+        $filter = new PaymentMode();
+        $filter->setForRefund((int)true);
+        if( !$paginatedResult = $this->getPaymentModeByParam($filter) )
+            return false;
+        
+        //filter with supported payment mode
+        $supportedRefundModes = new PaymentModeCollection();
+        
+        $listingServ = new SupportedPaymentModeListingService();
+        $supportedPaymentModes = $listingServ->getByFunction(RequestHeader::getByKey(ResponseHeader::FIELD_X_AUTHORIZATION), PaymentDirection::OUT);
+        foreach( $paginatedResult->result AS $paymentMode )
+        {
+            if( in_array($paymentMode->getCode(), $supportedPaymentModes) )
+                $supportedRefundModes->addData($paymentMode);
         }
-
-        $this->setResponseCode(MessageCode::CODE_GET_PAYMENT_MODE_SUCCESS);
-        return $payment_mode_arr;
-    }
+        
+        if( count($supportedRefundModes) > 0 )
+        {
+            $result = new PaginatedResult();
+            $result->setResult($supportedRefundModes);
+            $result->setTotal(count($supportedRefundModes));
+            return $result;
+        }
+        
+        $this->setResponseCode(MessageCode::CODE_GET_PAYMENT_MODE_FAILED);
+        return false;
+    }            
 
     public function getSupportedPaymentModeByUserId($user_profile_id, $direction, $access_type = NULL)
     {

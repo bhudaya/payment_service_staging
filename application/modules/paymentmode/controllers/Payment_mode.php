@@ -2,9 +2,8 @@
 
 use Iapps\PaymentService\PaymentMode\PaymentModeRepository;
 use Iapps\PaymentService\PaymentMode\PaymentModeService;
-use Iapps\PaymentService\Common\MessageCode;
 use Iapps\Common\Helper\ResponseHeader;
-use Iapps\PaymentService\PaymentMode\PaymentMode;
+use Iapps\PaymentService\PaymentMode\SupportedPaymentModeListingService;
 
 class Payment_Mode extends Base_Controller {
 
@@ -12,6 +11,7 @@ class Payment_Mode extends Base_Controller {
     function __construct()
     {
         parent::__construct();
+        $this->_authoriseClient();
 
         $this->load->model('paymentmode/payment_mode_model');
         $repo = new PaymentModeRepository($this->payment_mode_model);
@@ -98,10 +98,10 @@ class Payment_Mode extends Base_Controller {
 
     public function getPaymentModesForRefund()
     {
-        $paymentMode = new PaymentMode();
-        $paymentMode->setForRefund((int)true);
+        if(!$user_id = $this->_getUserProfileId() )
+            return false;        
 
-        if( $object = $this->_payment_mode_service->getPaymentModeByParam($paymentMode) )
+        if( $object = $this->_payment_mode_service->getRefundPaymentMode() )
         {
             $this->_respondWithSuccessCode($this->_payment_mode_service->getResponseCode(), array('result' => $object->result, 'total' => $object->total));
             return false;
@@ -126,14 +126,21 @@ class Payment_Mode extends Base_Controller {
 
         $access_token = $this->input->get_request_header(ResponseHeader::FIELD_X_AUTHORIZATION);
         $direction = $this->input->get("direction");
+        $selfservice = $this->input->get("self_service") == '1' ? true : false;
 
-        if( $info = $this->_payment_mode_service->getSupportedPaymentModeByFunction($access_token, $direction) )
+        $listingServ = new SupportedPaymentModeListingService();
+        if( $selfservice )
+            $info = $listingServ->getSelfService();
+        else
+            $info = $listingServ->getByFunction($access_token, $direction);
+        
+        if( $info )
         {
-            $this->_respondWithSuccessCode($this->_payment_mode_service->getResponseCode(), array('result' => $info));
+            $this->_respondWithSuccessCode($listingServ->getResponseCode(), array('result' => $info));
             return false;
         }
 
-        $this->_respondWithCode($this->_payment_mode_service->getResponseCode(), ResponseHeader::HEADER_NOT_FOUND);
+        $this->_respondWithCode($listingServ->getResponseCode(), ResponseHeader::HEADER_NOT_FOUND);
         return false;
     }
 

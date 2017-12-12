@@ -6,6 +6,10 @@ class PaymentModeServiceFactory{
 
     protected static $_instance = array();
 
+    /**
+     * 
+     * @return PaymentModeService
+     */
     public static function build()
     {
         if (self::$_instance == NULL) {

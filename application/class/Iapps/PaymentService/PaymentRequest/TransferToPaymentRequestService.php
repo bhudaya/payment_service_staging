@@ -19,6 +19,16 @@ use Iapps\Common\Core\IappsDateTime;
 use Iapps\PaymentService\Payment\PaymentServiceFactory;
 use Illuminate\Support\Facades\Log;
 use Iapps\Common\Microservice\RemittanceService\RemittanceTransactionService;
+use Iapps\PaymentService\Common\ReconFileS3Uploader;
+use Iapps\PaymentService\Common\CoreConfigDataServiceFactory;
+use Iapps\PaymentService\Common\CoreConfigType;
+use Iapps\Common\CommunicationService\EmailAttachment;
+use Iapps\Common\CommunicationService\CommunicationServiceProducer;
+use Iapps\Common\Microservice\RemittanceService\RemittanceRecordServiceFactory;
+use phpseclib\Crypt\RSA;
+use phpseclib\Net\SFTP;
+use Iapps\Common\AuditLog\AuditLogAction;
+
 
 
 class TransferToPaymentRequestService extends PaymentRequestService{
@@ -62,8 +72,11 @@ class TransferToPaymentRequestService extends PaymentRequestService{
         $TransferTo_switch_client->setReferenceNo($request->getTransactionID());
         $TransferTo_switch_client->setTransactionID($request->getTransactionID());
         $country_currency_code = $request->getCountryCurrencyCode();
-        
+
         $TransferTo_switch_client->setCountryCurrencyCode($country_currency_code);
+
+        $TransferTo_switch_client->setPaymentMode(TransferToSwitchFunction::BANK_TRANSFER_TT1);
+
 
 
         if( $sender_dob = $request->getOption()->getValue('sender_dob'))
@@ -95,6 +108,12 @@ class TransferToPaymentRequestService extends PaymentRequestService{
             $TransferTo_switch_client->setSenderPhone($sender_phone);
         if( $sender_fullname = $request->getOption()->getValue('sender_fullname') )
             $TransferTo_switch_client->setSenderFullname($sender_fullname);
+        if( $sender_postal_code= $request->getOption()->getValue('sender_postal_code') )
+            $TransferTo_switch_client->setSenderPostalCode($sender_postal_code);
+        if( $sender_id_type= $request->getOption()->getValue('sender_id_type') )
+            $TransferTo_switch_client->setSenderIdType($sender_id_type);
+        
+        
         if( $receiver_address = $request->getOption()->getValue('receiver_address') )
             $TransferTo_switch_client->setReceiverAddress($receiver_address);
         if( $receiver_mobile_phone = $request->getOption()->getValue('receiver_mobile_phone') )
@@ -106,8 +125,6 @@ class TransferToPaymentRequestService extends PaymentRequestService{
             $TransferTo_switch_client->setReceiverBirthDate($receiver_birth_date);
         if( $receiver_email = $request->getOption()->getValue('receiver_email') )
             $TransferTo_switch_client->setReceiverEmail($receiver_email);
-        
-        
         if( $landed_currency = $request->getOption()->getValue('landed_currency') )
             $TransferTo_switch_client->setLandedCurrency($landed_currency);
 
@@ -131,8 +148,8 @@ class TransferToPaymentRequestService extends PaymentRequestService{
         if( !$v->fails() )
         {
 
-               $request->setStatus(PaymentRequestStatus::PENDING);
-               return true;
+            $request->setStatus(PaymentRequestStatus::PENDING);
+            return true;
 
         }
 
@@ -159,6 +176,7 @@ class TransferToPaymentRequestService extends PaymentRequestService{
             return false;
         }
 
+        $transferto_switch_client->setPaymentMode(TransferToSwitchFunction::BANK_TRANSFER_TT1);
 
         $transferto_switch_client->setResponseFields($request->getResponse()->toArray());
 
@@ -173,16 +191,20 @@ class TransferToPaymentRequestService extends PaymentRequestService{
             $request->getResponse()->add('transferto_response', $response->getFormattedResponse());
             $request->getResponse()->add('transferto_process', $transferto_switch_client->getTransfertoInfo());
 
+            $request->setReferenceID($response->getTransactionIDSwitcher());
             if( $result ) {
                 $request->setReferenceID($response->getTransactionIDSwitcher());
                 return parent::_completeAction($request);
             }else{
                 if($request->getStatus()==PaymentRequestStatus::FAIL){
                     $this->setResponseMessage($response->getDescription());
+                    $request->setFail();
+                    $this->getRepository()->updateResponse($request);
                     Logger::debug('Transferto Failed - ' . $request->getStatus() . ': ' . $response->getResponse() . ': ' . $transferto_switch_client->getTransfertoInfo());
                 }
                 if($request->getStatus()==PaymentRequestStatus::PENDING){
                     $this->setResponseMessage($response->getDescription());
+                    $this->getRepository()->updateResponse($request);
                     Logger::debug('Transferto Pending - ' . $request->getStatus() . ': ' . $response->getResponse() . ': ' . $transferto_switch_client->getTransfertoInfo());
                 }
             }
@@ -228,26 +250,32 @@ class TransferToPaymentRequestService extends PaymentRequestService{
 
             if(array_key_exists("status",$transferto_response_arr)) {
 
-                if ($transferto_response_arr["status"] == "PRC" ||  $transferto_response_arr["status"] == "20000"  ) {
+                if ($transferto_response_arr["status"] == "PRC" || $transferto_response_arr["status"] == "20000" || $transferto_response_arr["status"] == "50000" || $transferto_response_arr["status"] == "60000" ) {
                     if ($response = $transferto_switch_client->bankTransfer()) {
                         $ori_request = clone($request);
 
                         $result = $this->_checkResponse($request, $response);
-                        $this->getRepository()->startDBTransaction();
+                        $this->getRepository()->beginDBTransaction();
                         if ($result) {
 
                             if ($complete = parent::_completeAction($request)) {
-                                $request->getResponse()->setJson(json_encode(array("TMoney Bank Transfer" => $transferto_switch_client->getTransactionType())));
+                                $request->getResponse()->setJson(json_encode(array("Transferto Bank Transfer" => $transferto_switch_client->getTransactionType())));
                                 $request->getResponse()->add('transferto_response', $response->getFormattedResponse());
                                 $request->getResponse()->add('transferto_process', $transferto_switch_client->getTransfertoInfo());
                                 $request->setReferenceID($response->getTransactionIDSwitcher());
 
                                 if (parent::_updatePaymentRequestStatus($request, $ori_request)) {
-                                    $this->getRepository()->completeDBTransaction();
+                                    Logger::debug("Transferto reprocess Request Success");
+                                    Logger::debug($request->getTransactionID());
+                                    if ($this->getRepository()->statusDBTransaction() === FALSE){
+                                        $this->getRepository()->rollbackDBTransaction();
+                                    }else {
+                                        $this->getRepository()->commitDBTransaction();
+                                    }
                                     $this->setResponseCode(MessageCode::CODE_REQUEST_COMPLETED);
                                     return true;
                                 } else {
-                                    Logger::debug("reprocessRequest failed");
+                                    Logger::debug("Transferto reprocess Request failed");
                                     $this->getRepository()->rollbackDBTransaction();
                                     $this->setResponseCode(MessageCode::CODE_PAYMENT_REQUEST_FAIL); //***
                                     return false;
@@ -255,7 +283,7 @@ class TransferToPaymentRequestService extends PaymentRequestService{
                             }
                         } else {//failed or still processing
 
-                            $request->getResponse()->setJson(json_encode(array("TMoney Bank Transfer" => $transferto_switch_client->getTransactionType())));
+                            $request->getResponse()->setJson(json_encode(array("Transferto Bank Transfer" => $transferto_switch_client->getTransactionType())));
                             $request->getResponse()->add('transferto_response', $response->getFormattedResponse());
                             $request->getResponse()->add('transferto_process', $transferto_switch_client->getTransfertoInfo());
 
@@ -263,11 +291,19 @@ class TransferToPaymentRequestService extends PaymentRequestService{
                                 $this->setResponseMessage($response->getRemarks());
                                 $request->setFail();
                                 $this->getRepository()->updateResponse($request);
-                                $this->getRepository()->completeDBTransaction();
+                                if ($this->getRepository()->statusDBTransaction() === FALSE){
+                                    $this->getRepository()->rollbackDBTransaction();
+                                }else {
+                                    $this->getRepository()->commitDBTransaction();
+                                }
                                 return true;
                             } elseif ($request->getStatus() == PaymentRequestStatus::PENDING) {
                                 $this->getRepository()->updateResponse($request);
-                                $this->getRepository()->completeDBTransaction();
+                                if ($this->getRepository()->statusDBTransaction() === FALSE){
+                                    $this->getRepository()->rollbackDBTransaction();
+                                }else {
+                                    $this->getRepository()->commitDBTransaction();
+                                }
                                 return false;
                             }
                         }
@@ -301,178 +337,572 @@ class TransferToPaymentRequestService extends PaymentRequestService{
         $lines = file($filename);
 
         $j=0;
-        $notfound = false;
+        $notfound = true;
         foreach ($lines as $line_num => $line) {
             $clm = explode(',',$line);
-            if ($j > 0) {
+            $tot_clm = count($clm);
+            if ($j > 0   && $tot_clm >=4 ) {
                 $transactionIDTt = trim(substr($clm[4], 0, 20));
-                echo"trx db :";print_r($trx_id); echo "|";
-                echo"trx TT :";print_r($transactionIDTt);echo"|";
                 if ($transactionIDTt == trim($trx_id)) {
                     $notfound=false;
-                    //break;
+                    break;
                 }else{
-                    $notfound = true; 
+                    $notfound = true;
                 }
+
             }
             $j++;
         }
-
         return $notfound;
     }
-    
-    
-    public function reconTransaction($trx_date){
 
-        $transferto_file = "../files/transferto-recon/iApps-". $trx_date .".csv";
 
-        if(!file_exists($transferto_file)) {
+    public function reconTransaction($recon_date){
+
+        //$this->getFileRecon($trx_date);
+        $configServ = CoreConfigDataServiceFactory::build();
+        $user_client    =  AccountServiceFactory::build();
+        //$remittanceRecordService = RemittanceRecordServiceFactory::build();
+        $remittanceTrxService = RemittanceTransactionServiceFactory::build("admin");
+        //$remittanceRecordService = RemittanceRecordServiceFactory::build();
+
+        $out_path =  $configServ->getConfig(CoreConfigType::TRANSFERTO_INTERFACE_OUT_PATH);
+        $in_path =  $configServ->getConfig(CoreConfigType::TRANSFERTO_INTERFACE_IN_PATH);
+        $transferto_file_name = $configServ->getConfig(CoreConfigType::TRANSFERTO_REPORT_FILE);
+
+        $transferto_file =  $transferto_file_name. str_replace("-",".",$recon_date) .".csv";
+        $in_file = $in_path.$transferto_file;
+        $trx_date = date('Y-m-d', strtotime('-1 days', strtotime($recon_date)));
+
+        if(!file_exists($in_file)) {
             return false;
-        }    
+        }
 
         //------------------------------ create success and suspect file -----
         // based on transferto report file
-        $lines = file($transferto_file);
+        $lines = file($in_file);
         $j=0;
-        $header="creation_date;operation_date;transaction_status;t2_id;ext_id;sender_country;sender_name;recipient_country;recipient_name  ;recipient_msisdn;received_amount;received_amount_currency;settlement_amount_sgd;payout_rate_sgd;t2_commission_sgd;total_value_sgd;iapps_status\n";
+        //$header= "#,Application,User ID,Reference No,Send Currency,Settlement Amount SGD,Receive Currency,Receive Amount,Cost Currency,Cost,Status,SLIDE Receipt No.,External Reference No,Time of API Call,Send Currency,Send Amount,Receive Currency,Receive Amount,Transaction Status,Recon Status,New Transaction Status,Refund ID ,Refund Status,Field Not Matched,New Refund Status\n";
+        //$header= "#,Application,User ID,Reference No,Send Currency,Settlement Amount SGD,Receive Currency,Receive Amount,T2 Comission USD,Status,SLIDE Receipt No.,External Reference No,Time of API Call,Send Currency,Send Amount,Receive Currency,Receive Amount,Transaction Status ,Refund Status  ,Refund Transaction ID ,Recon Status ,Field Not Matched ,New Transaction Status (Auto Update)\n";
 
-        $dataSuccess11="";
-        $dataSuccess12="";
-        $dataSuccess10="";
-        $dataFailed21="";
-        $dataFailed22="";
-        $dataFailed20="";
+        $header= "#,Application,User ID,Reference No,Send Currency,Settlement Amount SGD,Receive Currency,Receive Amount,T2 Comission USD,Status,SLIDE Receipt No.,External Reference No,Time of API Call,Send Currency,Send Amount,Receive Currency,Receive Amount,Transaction Status ,Refund Status  ,Refund Transaction ID ,Recon Status ,Field Not Matched\n";
+
+
+        $dataOk="";
+        $dataSuspect="";
+        $dataForced ="";
+        $dataRecon ="";
+        $tot_match = 0;
+        $tot_not_match =0;
+        $tot_not_found =0;
+        $sgd_send = 0;$sgd_receive = 0;$sgd_fee = 0 ;
+        $idr_send = 0;$idr_receive = 0;$idr_fee = 0 ;
+        $php_send = 0;$php_receive = 0;$php_fee = 0 ;
+        $mmk_send = 0;$mmk_receive = 0;$mmk_fee = 0 ;
+        $slide_trx =0;
+        $slide_sgd_send = 0;$slide_sgd_receive = 0;
+        $slide_idr_send = 0;$slide_idr_receive = 0;
+        $slide_php_send = 0;$slide_php_receive = 0;
+        $slide_mmk_send = 0;$slide_mmk_receive = 0;
+
+
         foreach ($lines as $line_num => $line) {
             $statusdb="";
+
             $line = str_replace("\n","",$line);
             $line = str_replace("\r","",$line);
-            
-            if($j == 0){                
-                $dataSuccess11 = $header;
-                $dataSuccess12 = $header;
-                $dataSuccess10 = $header;
-                $dataFailed21 =  $header;
-                $dataFailed22 =  $header;
-                $dataFailed20 =  $header;                
-            }else{            
-                //print_r($line);
-                $clm = explode(',',$line);
-                $status = $clm[2];
-                $transactionID = trim(substr($clm[4],0,20)) ;
+            $line = str_replace('"',"",$line);
 
-                $requests = $this->findRequestByRef($transactionID);
-                if($requests) {
-                    foreach ($requests->result as $req) {
-                        if ($req instanceof PaymentRequest) {
-                            $statusdb = $req->getStatus();
-                        }
+            $line = trim($line);
+            $clm = explode(',',$line);
+            $transactionID ="";
+            $tot_clm = count($clm);
+
+            if($j > 0   &&  $tot_clm >= 4) {
+                $transactionID = substr(trim($clm[4]), 0, 19);
+                $header_id = substr($transactionID, 0, 13);
+                $transaction_id_in = substr($transactionID, 13, 6) - 1;
+                for ($i = strlen($transaction_id_in); $i < 6; $i++) {
+                    $transaction_id_in = "0" . $transaction_id_in;
+                }
+                $transaction_id_in = $header_id . $transaction_id_in;
+            }
+
+            if($j > 0   && $transactionID != ""){
+                $status = $clm[2];
+                $reference_id = $clm[3];
+                $send_currency = 'SGD';
+                $send_amount = $clm[12];       //transferto
+                $receive_currency = $clm[11];
+                $receive_amount = $clm[10];
+                $cost_currency = 'SGD';
+                $cost_amount = $clm[14];
+                $transactionID_db="";
+                $timeApi="";
+                $field_not_matched = "";
+                $remittance_id="";
+                $slide_send_amount=0;
+                $slide_receive_amount=0;
+                $slide_receive_currency="";
+                $slide_send_currency="";
+                $recon_status="";
+                $new_status="";
+                $new_refund_status ="";
+                $userId="";$id="";
+                $external_ref_id ="";
+                $last_response="";$refund_id="";
+
+
+              if($requests = $this->findRequestByRef($transactionID)) {
+
+                  foreach ($requests->result as $req) {
+                      if ($req instanceof PaymentRequest) {
+                          $id = $req->getId();
+                          //$statusdb = $req->getStatus();
+                          $transactionID_db = $req->getTransactionID();
+                          $timeApi = $req->getCreatedAt()->getString();
+                          $option = $req->getOption()->toArray();
+                          $last_response = $req->getResponse()->toArray();
+                          $external_ref_id = $req->getReferenceID();
+                      }
+                  }
+
+                  if (array_key_exists("transferto_response", $last_response)) {
+                      $transferto_response = $last_response["transferto_response"];
+                      $transferto_process = $last_response["transferto_process"];
+                      $transferto_response_arr = json_decode($transferto_response, true);
+                      $transferto_process_arr = json_decode($transferto_process, true);
+                      if (array_key_exists("id", $transferto_response_arr)) {
+                          $external_ref_id = $transferto_response_arr["id"];
+                      }
+                  }
+
+                  if ($remitt_data = $remittanceTrxService->getTransactionHistoryDetailByRefId($transactionID_db, 1, 1)) {
+                      $remittance_id = $remitt_data->result->remittance->remittanceID;
+                      $remitt_id = $remitt_data->result->remittance->id;
+                      $reason = $remitt_data->result->remittance->reason;
+                      $userId = $remitt_data->result->remittance->sender->accountID;
+                      $slide_send_amount = $remitt_data->result->remittance->from_amount;
+                      $slide_receive_amount = $remitt_data->result->remittance->to_amount;
+                      $slide_send_currency = explode("-", $remitt_data->result->remittance->from_country_currency_code)[1];
+                      $slide_receive_currency = explode("-", $remitt_data->result->remittance->to_country_currency_code)[1];
+                      $statusdb =$remitt_data->result->remittance->status;
+
+                  }
+              }
+
+                // payment request -> ('pending', 'success', 'fail', 'cancelled', 'pending_collection')
+                // remittance status -> collected  failed   delivering  , expired
+
+                if (trim($status) == "COMPLETED") {
+                     if (trim($statusdb) == "collected") {
+                         $dataOk = $dataOk . $line . "," . $statusdb . "\n";   //transferto success  - iapps success
+                         $recon_status = "matched";
+                         $slide_trx++;
+                     }
+                     if (trim($statusdb) == "failed" || trim($statusdb) == "delivering" || trim($statusdb) == "pending_collection") {
+                         $dataSuspect = $dataSuspect . $line . "," . $statusdb . "\n";  //success - fail   (low suspect)
+                         $recon_status = "not matched";
+                         //$new_status = "collected";
+                         $field_not_matched = "Transaction Status";
+                         $slide_trx++;
+                     }
+                     if (trim($statusdb) == "") {
+                         $dataSuspect = $dataSuspect . $line . "," . $statusdb . "\n";  //success - not found   (high suspect)
+                         $recon_status = "not found";
+                         //$new_status = "collected";
+                         $tot_not_found++;
+                     }
+                 }else if(trim($status) == "SUBMITTED"){
+
+                     if (trim($statusdb) == "delivering") {
+                         $dataOk = $dataOk . $line . "," . $statusdb . "\n";   //transferto success  - iapps success
+                         $recon_status = "matched";
+                         $slide_trx++;
+                     }
+
+                     if (trim($statusdb) == "failed" || trim($statusdb) == "collected" || trim($statusdb) == "pending_collection") {
+                         $dataSuspect = $dataSuspect . $line . "," . $statusdb . "\n";  //success - fail   (low suspect)
+                         $recon_status = "not matched";
+                         $new_status = "pending";
+                         $field_not_matched = "Transaction Status";
+                         $slide_trx++;
+                     }
+
+                     if (trim($statusdb) == "") {
+                         $dataSuspect = $dataSuspect . $line . "," . $statusdb . "\n";  //success - not found   (high suspect)
+                         $recon_status = "not found";
+                         //$new_status = "pending";
+                         $tot_not_found++;
+                     }
+                 }else if(trim($status) == "AVAILABLE"){
+
+                     if (trim($statusdb) == "pending_collection") {
+                         $dataOk = $dataOk . $line . "," . $statusdb . "\n";   //transferto success  - iapps success
+                         $recon_status = "matched";
+                         $slide_trx++;
+                     }
+
+                     if (trim($statusdb) == "failed" || trim($statusdb) == "collected" || trim($statusdb) == "delivering") {
+                         $dataSuspect = $dataSuspect . $line . "," . $statusdb . "\n";  //success - fail   (low suspect)
+                         $recon_status = "not matched";
+                         //$new_status = "pending_collection";
+                         $field_not_matched = "Transaction Status";
+                         $slide_trx++;
+                     }
+
+                     if (trim($statusdb) == "") {
+                         $dataSuspect = $dataSuspect . $line . "," . $statusdb . "\n";  //success - not found   (high suspect)
+                         $recon_status = "not found";
+                         //$new_status = "pending_collection";
+                         $tot_not_found++;
+                     }
+                 } else {
+                     if (trim($statusdb) == "collected"  || trim($statusdb) == "delivering" || trim($statusdb) == "pending_collection") {
+                         $dataForced = $dataForced . $line . "," . $statusdb . "\n";   //fail - success    high forced
+                         $recon_status = "not matched";
+                         $new_status = "failed";
+                         $field_not_matched = "Transaction Status";
+                         $slide_trx++;
+                     }
+                     if (trim($statusdb) == "failed") {
+                         $dataOk = $dataOk . $line . "," . $statusdb . "\n";  //fail - fail
+                         $recon_status = "matched";
+                         $slide_trx++;
+                     }
+                     if (trim($statusdb) == "") {
+                         $dataSuspect = $dataSuspect . $line . "," . $statusdb . "\n";   //fail - not found   (high suspect)
+                         $recon_status = "not found";
+                         $new_status = "failed";
+                         $tot_not_found++;
+                     }
+                 }
+
+
+
+                 if ($new_status == "failed" || trim($statusdb) == "failed" ) {
+                     if ($refund = $remittanceTrxService->getRefundRequestByTransactionID($transaction_id_in)) {
+                         $new_refund_status = $refund->result->status;
+                         $refund_id = $refund->result->refundID;
+                     }
+                 }
+
+                if($recon_status != "not found"  &&  $field_not_matched != "Transaction Status") {
+                    if ($reference_id != $external_ref_id) {
+                        $recon_status = "not matched";
+                        $field_not_matched = "Reference No";
+                    }
+                    if ($receive_amount != $slide_receive_amount) {
+                        $recon_status = "not matched";
+                        $field_not_matched = "Receive Amount";
                     }
                 }
 
-                if(trim($status) == "COMPLETED"){
-                    if(trim($statusdb) == "success") {
-                        $dataSuccess11 = $dataSuccess11 . $line . ";" .$statusdb . "\n" ;   //transferto success  - iapps success
-                    }
-                    if(trim($statusdb) == "fail") {
-                       $dataSuccess12 = $dataSuccess12 . $line . ";" .$statusdb . "\n";  //success - fail
-                    }
-                    if(trim($statusdb) == "") {
-                        $dataSuccess10 = $dataSuccess10 . $line . ";" . $statusdb . "\n";  //success - not found
-                    }
+                /*****   count total amount ******/
+                if (trim($send_currency) == "SGD")    //settlement with slide is sgd
+                    $sgd_send = $sgd_send + $send_amount;
+                if (trim($send_currency) == "IDR")
+                    $idr_send = $idr_send + $send_amount;
+                if (trim($send_currency) == "PHP")
+                    $php_send = $php_send + $send_amount;
+                if (trim($send_currency) == "MMK")
+                    $mmk_send = $mmk_send + $send_amount;
+
+                if (trim($receive_currency) == "SGD")
+                    $sgd_receive = $sgd_receive + $receive_amount;
+                if (trim($receive_currency) == "IDR")
+                    $idr_receive = $idr_receive + $receive_amount;
+                if (trim($receive_currency) == "PHP")
+                    $php_receive = $php_receive + $receive_amount;
+                if (trim($receive_currency) == "MMK")
+                    $mmk_receive = $mmk_receive + $receive_amount;
+
+                if (trim($cost_currency) == "SGD")
+                    $sgd_fee = $sgd_fee + $cost_amount;
+
+                //slide summary
+                if (trim($slide_send_currency) == "SGD")
+                    $slide_sgd_send = $slide_sgd_send + $slide_send_amount;
+                if (trim($slide_send_currency) == "IDR")
+                    $slide_idr_send = $slide_idr_send + $slide_send_amount;
+                if (trim($slide_send_currency) == "PHP")
+                    $slide_php_send = $slide_php_send + $slide_send_amount;
+                if (trim($slide_send_currency) == "MMK")
+                    $slide_mmk_send = $slide_mmk_send + $slide_send_amount;
+
+                if (trim($slide_receive_currency) == "SGD")
+                    $slide_sgd_receive = $slide_sgd_receive + $slide_receive_amount;
+                if (trim($slide_receive_currency) == "IDR")
+                    $slide_idr_receive = $slide_idr_receive + $slide_receive_amount;
+                if (trim($slide_receive_currency) == "PHP")
+                    $slide_php_receive = $slide_php_receive + $slide_receive_amount;
+                if (trim($slide_receive_currency) == "MMK")
+                    $slide_mmk_receive = $slide_mmk_receive + $slide_receive_amount;
+
+
+
+
+                if($recon_status == "matched") {
+                    $tot_match++;
+                    //transferto summary
 
                 }else{
-                    if(trim($statusdb) == "success") {
-                        $dataFailed21 = $dataFailed21 . $line . ";" .$statusdb . "\n";   //fail - success
+
+                    if($recon_status != "not found") {
+                        $tot_not_match++;
                     }
-                    if(trim($statusdb) == "fail") {
-                        $dataFailed22 = $dataFailed22 . $line . ";" .$statusdb . "\n";  //fail - fail
+
+                    $payment_request_status= Null;
+                    if($new_status == "collected") {
+                        $payment_request_status = "collected";
+                    }else if($new_status == "failed"){
+                        $payment_request_status = "failed";
+                    }else{
+                        $payment_request_status = $new_status;
                     }
-                    if(trim($statusdb) == "") {
-                        $dataFailed20 = $dataFailed20 . $line . ";" . $statusdb . "\n";  //fail - not found
+
+                    if($payment_request_status) {
+                        //$this->updatePaymentRequest($payment_request_status, $transactionID);
                     }
                 }
+
+
+
+
+
+                 $row = $j . "," . "slide" . "," . $userId . "," . $reference_id . "," . $send_currency . "," . $send_amount . "," . $receive_currency . "," . $receive_amount
+                     . "," . $cost_amount . "," . $status . "," . $remittance_id . "," . $external_ref_id . "," . $timeApi
+                     . "," . $slide_send_currency . "," . $slide_send_amount . "," . $slide_receive_currency . "," . $slide_receive_amount
+                     . "," . $statusdb . " ," . $new_refund_status . "  ," . $refund_id . "," . $recon_status . "  ," . $field_not_matched ;
+
+                 // remove $new_status;
+
+                 $dataRecon = $dataRecon . $row . "\n";
+
+
             }
+
             $j++;
         }
 
-        $filename ="../files/transferto-recon/transferto-success11-". $trx_date .".csv";
-        $this->createFileRecon($filename,$dataSuccess11);
-        $filename ="../files/transferto-recon/transferto-success12-". $trx_date .".csv";
-        $this->createFileRecon($filename,$dataSuccess12);
-        $filename ="../files/transferto-recon/transferto-success10-". $trx_date .".csv";
-        $this->createFileRecon($filename,$dataSuccess10);
-        $filename ="../files/transferto-recon/transferto-failed21-". $trx_date .".csv";
-        $this->createFileRecon($filename,$dataFailed21);
-        $filename ="../files/transferto-recon/transferto-failed22-". $trx_date .".csv";
-        $this->createFileRecon($filename,$dataFailed22);
-        $filename ="../files/transferto-recon/transferto-failed20-". $trx_date .".csv";
-        $this->createFileRecon($filename,$dataFailed20);
+        $total_tt_trx = $j-1 ;
 
 
+        //$filename ="../files/transferto-recon/transferto-ok-". $trx_date .".csv";
+        //$this->createFileRecon($filename,$dataOk);
+        //$filename ="../files/transferto-recon/transferto-suspect-". $trx_date .".csv";
+        //$this->createFileRecon($filename,$dataSuspect);
 
 
-        //------------------------------ create forced file   based on iapps database -----        
+        //------------------------------ create forced file   based on iapps database -----
         if ($requests = $this->findPendingRequestByDate($trx_date)){
 
-            $header = "TRANSACTION DATE ; TRANSACTION_ID ; REFERENCE_ID ; EXTERNAL_ID ; STATUS ; STATUS MESSAGE \n";
-            $i=0;
+            $i=0;$k=0;
             $dataNotFound01="";
             $dataNotFound02="";
             foreach ($requests->result as $req) {
                 if ($req instanceof PaymentRequest) {
-                    $data  = $req->getCreatedAt()->getString() . ";" ;
-                    $data .= $req->getTransactionID() . ";" ;
-                    $data .= $req->getReferenceID() . ";" ;
-                    $data .= $req->getStatus() ;
-                    $notfound =$this->findTrxInReportFile($transferto_file,$req->getTransactionID());
-                    echo "status:";
-                    print_r($req->getStatus());echo "----- end-------";
-                    if($notfound){
-                        if ($req->getStatus() == "success"){
-                            $dataNotFound01 = $dataNotFound01 . $data . "\n";   //transferto not found  - iapps success
-                        }else{
-                            $dataNotFound02 = $dataNotFound02 . $data . "\n";   //transferto not found  - iapps failed
+                    $userId = $req->getUserProfileId();
+                    $reference_id = "";
+                    $external_ref_id = $req->getReferenceID();
+                    $send_currency = "";
+                    $send_amount = "";
+                    $receive_currency ="";
+                    $receive_amount ="";
+                    $cost_currency = "";
+                    $cost_amount="";
+                    $status = "";
+                    $transactionID_db = $req->getTransactionID();
+                    $timeApi = $req->getCreatedAt()->getString();
+                    //$statusdb = $req->getStatus();
+                    $recon_status = "not found";
+                    $new_status ="";
+                    $refund_status="";
+                    $new_refund_status="";
+                    $refund_id="";
+                    $slide_send_amount =0;
+                    $slide_send_currency = "";
+                    $slide_receive_amount =0;
+                    $slide_receive_currency = "";
+                    $field_not_matched="";
+                    $remittance_id="";
+                    $header_id = substr($transactionID_db,0,13);
+                    $transaction_id_in = substr($transactionID_db,13,6) - 1;
+                    for($i=strlen($transaction_id_in);$i<6;$i++){
+                        $transaction_id_in = "0" . $transaction_id_in ;
+                    }
+                    $transaction_id_in = $header_id . $transaction_id_in ;
 
-                        }
+                    if($remitt_data = $remittanceTrxService->getTransactionHistoryDetailByRefId($transactionID_db,1,1)){
+                        $remittance_id = $remitt_data->result->remittance->remittanceID ;
+                        $userId = $remitt_data->result->remittance->sender->accountID ;
+                        $slide_send_amount = $remitt_data->result->remittance->from_amount ;
+                        $slide_receive_amount = $remitt_data->result->remittance->to_amount ;
+                        $slide_send_currency = explode("-",$remitt_data->result->remittance->from_country_currency_code)[1] ;
+                        $slide_receive_currency = explode("-",$remitt_data->result->remittance->to_country_currency_code)[1] ;
+                        $statusdb = $remitt_data->result->remittance->status;
                     }
 
-                    /*
                     $last_response = $req->getResponse()->toArray() ;
                     if(array_key_exists("transferto_response",$last_response)) {
                         $transferto_response = $last_response["transferto_response"];
                         $transferto_process = $last_response["transferto_process"];
                         $transferto_response_arr = json_decode($transferto_response, true);
                         $transferto_process_arr = json_decode($transferto_process, true);
-
-                        if (array_key_exists("status", $transferto_response_arr)) {
-                            //$data .= $transferto_response_arr["status"] . ";";
-                            $data .= $transferto_response_arr["status_message"] . "\n";
+                        if(array_key_exists("quotation_response",$transferto_process_arr)) {
+                            //$slide_send_amount = $transferto_process_arr["quotation_response"]["source"]["amount"];
+                            //$slide_send_currency = $transferto_process_arr["quotation_response"]["source"]["currency"];
                         }
-                    }*/
+                    }
 
+                    $data  = $req->getCreatedAt()->getString() . "," ;
+                    $data .= " "."," ;      //operation date
+                    $data .= " "."," ;      //transaction status
+                    $data .= $req->getReferenceID() . "," ;      //t2_id
+                    $data .= $req->getTransactionID() . "," ;    //ext_id
+                    $data .= " "."," ;      //sender country
+                    $data .= " "."," ;      //sender name
+                    $data .= " "."," ;      //recipient country
+                    $data .= " "."," ;      //recipient name
+                    $data .= " "."," ;      //recipient msisdn
+                    $data .= " "."," ;      //received amount
+                    $data .= " "."," ;      //received amount currency
+                    $data .= " "."," ;      //settlement amount sgd
+                    $data .= " "."," ;      //payout rate sgd
+                    $data .= " "."," ;      //t2_commission_sgd
+                    $data .= " "."," ;      //total_value_sgd
+
+                    $data .= $req->getStatus() ;
+                    $notfound =$this->findTrxInReportFile($in_file,$req->getTransactionID());
+                    if($notfound){
+                        $tot_not_found++;
+
+                        if($refund =    $remittanceTrxService->getRefundRequestByTransactionID($transaction_id_in)){
+                            $new_refund_status = $refund->result->status;
+                            $refund_id = $refund->result->refundID;
+                        }
+
+                        $k++;
+                        $slide_trx++;
+                        if ($req->getStatus() == "success"){
+                            $dataNotFound01 = $dataNotFound01 . $data . "\n";   //transferto not found  - iapps success
+                            $dataForced = $dataForced . $data . "\n";   // transferto not found -  iapps success   high forced
+                        }else{
+                            $dataNotFound02 = $dataNotFound02 . $data . "\n";   //transferto not found  - iapps failed  repayment again
+
+                            if ($req->getStatus() == "fail" || $req->getStatus() == "failed") {
+                                $refund_status = "initated";
+                            }
+                        }
+
+
+                        //slide summary
+                        if (trim($slide_send_currency) == "SGD")
+                            $slide_sgd_send = $slide_sgd_send + $slide_send_amount;
+                        if (trim($slide_send_currency) == "IDR")
+                            $slide_idr_send = $slide_idr_send + $slide_send_amount;
+                        if (trim($slide_send_currency) == "PHP")
+                            $slide_php_send = $slide_php_send + $slide_send_amount;
+                        if (trim($slide_send_currency) == "MMK")
+                            $slide_mmk_send = $slide_mmk_send + $slide_send_amount;
+
+                        if (trim($slide_receive_currency) == "SGD")
+                            $slide_sgd_receive = $slide_sgd_receive + $slide_receive_amount;
+                        if (trim($slide_receive_currency) == "IDR")
+                            $slide_idr_receive = $slide_idr_receive + $slide_receive_amount;
+                        if (trim($slide_receive_currency) == "PHP")
+                            $slide_php_receive = $slide_php_receive + $slide_receive_amount;
+                        if (trim($slide_receive_currency) == "MMK")
+                            $slide_mmk_receive = $slide_mmk_receive + $slide_receive_amount;
+
+
+
+                        $row = $slide_trx .","."slide".",".$userId.",".$reference_id.",".$send_currency.",".$send_amount.",".$receive_currency.",".$receive_amount
+                            .",".$cost_amount.",".$status.",".$remittance_id ."," . $external_ref_id.",".$timeApi
+                            . ",".$slide_send_currency.",".$slide_send_amount.",".$slide_receive_currency.",".$slide_receive_amount
+                            . ",".$statusdb."  ,".$new_refund_status ."  ,".$refund_id." ,".$recon_status."   ,".$field_not_matched  ;
+                        // remove $new_status;
+                        $dataRecon = $dataRecon . $row .  "\n";
+                    }
                 }
                 $i++;
             }
-            $dataNotFound01 = $header . $dataNotFound01;
-            $dataNotFound02 = $header . $dataNotFound02;
-            $filename ="../files/transferto-recon/transferto-notfound01-". $trx_date .".csv";
-            $this->createFileRecon($filename,$dataNotFound01);
-            $filename ="../files/transferto-recon/transferto-notfound02-". $trx_date .".csv";
-            $this->createFileRecon($filename,$dataNotFound02);
+
+            //$filename ="../files/transferto-recon/transferto-forced-". $trx_date .".csv";
+            //$this->createFileRecon($filename,$dataForced);
         }
-        
-        
-        
+
+
+        $title =  "Transaction Date ," .$recon_date . "(Asia/Singapore)\n";
+        $linenull = " ".","." \n";
+        $summary  = "Overall Summary".","." \n";
+        $total_match = "Total no. of matched transactions:"."," .    $tot_match    ." \n";
+        $total_not_match = "Total no. of not matched transactions:".",". $tot_not_match . " \n";
+        $total_not_found = "Total no. of not found transactions:".",". $tot_not_found ." \n";
+        $summary = $summary . $total_match . $total_not_match . $total_not_found;
+        $title = $title .$linenull .$summary .$linenull;
+
+        $transferto_total = "Total no. of transactions from Transfer-To".",".  $total_tt_trx  ." \n";
+        $transferto_currency = "Currency".",".  "SGD" . ",".  "IDR" . ",".  "PHP" . ",".  "MMK"." \n";
+        $total_send = "Total Send amount:".",".  $slide_sgd_send . ",".  $slide_idr_send . ",".  $slide_php_send . ",".  $slide_mmk_send." \n";
+
+        $transferto_total_send = "Total Settlement amount:".",".  $sgd_send . ",".  $idr_send . ",".  $php_send . ",".  $mmk_send." \n";
+        $transferto_total_receive = "Total Receive amount:".",".  $sgd_receive . ",".  $idr_receive . ",". $php_receive . ",".  $mmk_receive." \n";
+        $transferto_total_fee = "Total Fee Charged:".",".  $sgd_fee . ",".  $idr_fee . ",".  $php_fee . ",".  $mmk_fee." \n";
+        //$tt_summary = $transferto_total . $transferto_currency  . $total_send . $transferto_total_send . $transferto_total_receive  . $transferto_total_fee . $linenull ;
+        $tt_summary = $transferto_total . $transferto_currency  .  $transferto_total_send . $transferto_total_receive  . $transferto_total_fee . $linenull ;
+
+        $slide_total = "Total no. of transactions from Slide".",".  $slide_trx  ." \n";
+        $slide_currency = "Currency".",".  "SGD" . ",".  "IDR" . ",".  "PHP" . ",".  "MMK"." \n";
+        $slide_total_send = "Total Send amount:".",".  $slide_sgd_send . ",".  $slide_idr_send . ",".  $slide_php_send . ",".  $slide_mmk_send." \n";
+        $slide_total_receive = "Total Receive amount:".",".  $slide_sgd_receive . ",".  $slide_idr_receive . ",". $slide_php_receive . ",".  $slide_mmk_receive." \n";
+        $slide_summary = $slide_total . $slide_currency . $slide_total_send . $slide_total_receive   . $linenull ;
+
+        $dataResult = $title . $tt_summary . $slide_summary. $header . $dataRecon ;
+        $trx_datef = str_replace('-','',$recon_date);
+
+        $result_file_name = "SLIDE_TRANSFERTO_". $trx_datef ."_results.csv";
+
+        $out_filename = $out_path . $result_file_name;
+        $this->createFileRecon($out_filename,$dataResult);
+        $this->_notifyReconcilationFile($transferto_file, $out_path, $result_file_name);
 
         return true;
     }
 
 
+    public function updatePaymentRequest($new_status,$trx_id)
+    {
+        $payment_request = new PaymentRequest();
+        $payment_request->setTransactionID($trx_id);
+        $this->getRepository()->startDBTransaction();
+        if($requests = $this->getRepository()->findBySearchFilter($payment_request, null, null, null)){
+            foreach ($requests->result as $req) {
+                if ($req instanceof PaymentRequest) {
+                    $req->setTransactionID($trx_id);
+                    $req->setStatus($new_status);
+                    $req->setUpdatedBy($this->getUpdatedBy());
+
+                    if ($this->getRepository()->updateStatus($req)) {
+                        $this->getRepository()->completeDBTransaction();
+                        $this->setResponseCode(MessageCode::CODE_EDIT_PAYMENT_REQUEST_SUCCESS);
+                        //dispatch event to auditLog
+                        $this->fireLogEvent('iafb_payment.payment_request', AuditLogAction::UPDATE, $req->getId(), $req);
+                        return true;
+                    }
+                }
+            }
+        }
+        $this->getRepository()->rollbackDBTransaction();
+        $this->setResponseCode(MessageCode::CODE_EDIT_PAYMENT_REQUEST_FAILED);
+        return false;
+    }
+
     public function createFileRecon($file_name,$data){
-        if($file = fopen($file_name, "a")) {
+        if($file = fopen($file_name, "w+")) {
             fwrite($file, $data);
             fclose($file);
-            chmod($file_name, 0777);
+            //chmod($file_name, 0777);
             return true;
         }
         return false;
@@ -489,10 +919,6 @@ class TransferToPaymentRequestService extends PaymentRequestService{
         return $requests;
 
     }
-    
-    
-    
-    
 
     public function updateRequest(PaymentRequest $request){
         if($this->getRepository()->update($request)){
@@ -513,11 +939,11 @@ class TransferToPaymentRequestService extends PaymentRequestService{
 
 
         if($response = $TransferTo_switch_client->inquiry() ) {   //add for TransferTo only
-           if (!$response->getResponseCode() == '0') {
+            if (!$response->getResponseCode() == '0') {
                 return false;
             }
 
-           return $response;
+            return $response;
         }
         return false;
     }
@@ -598,6 +1024,41 @@ class TransferToPaymentRequestService extends PaymentRequestService{
             }
             //$this->setResponseMessage("Check Bank Account Failed");
             return $result ;
+        }
+
+        return false;
+    }
+
+
+
+    protected function _notifyReconcilationFile($fileDate, $outPath, $okName)
+    {
+        //get config data
+        $configServ = CoreConfigDataServiceFactory::build();
+        if( $email = $configServ->getConfig(CoreConfigType::TRANSFERTO_INTERFACE_EMAIL) )
+        {
+            $email = explode('|', $email);
+            if( is_array($email) ) {
+                $subject = 'Transfer-to Reconciliation '.$fileDate;
+
+                $okUploader = new ReconFileS3Uploader($outPath, $okName);
+
+                $content = "<p>Transfer-to Reconcilation Interface Files [$fileDate]:</p>
+							<p></p>";
+
+                $attachment = new EmailAttachment();
+
+                $fileName = '';
+                if ($okUploader->uploadtoS3(NULL)) {
+                    $fileName = $okUploader->getFileName();
+                    $attachment->add($okUploader->getFileName(), $okUploader->getUrl());
+                }
+                $content .= "<p>Reconciliation File: [$fileName]</p>";
+                $content .= "<p></p><p>Thank You</p>";
+
+                $ics = new CommunicationServiceProducer();
+                return $ics->sendEmail(getenv('ICS_PROJECT_ID'), $subject, $content, $content, $email, $attachment);
+            }
         }
 
         return false;

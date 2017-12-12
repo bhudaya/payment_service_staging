@@ -476,6 +476,12 @@ class PaymentRequest extends IappsBaseEntity{
         return $json;
     }
 
+    public function setPendingCollection()
+    {
+        $this->setStatus(PaymentRequestStatus::PENDING_COLLECTION);
+        return $this;
+    }
+
     public function setSuccess()
     {
         $this->setStatus(PaymentRequestStatus::SUCCESS);

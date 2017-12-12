@@ -39,7 +39,7 @@ class BTIndoOCBCPaymentRequestService extends PaymentRequestService{
     /*
      * BT Indo OCBC only call to switch upon complete
      */
-    public function _requestAction(PaymentRequest $request)
+    protected function _requestAction(PaymentRequest $request)
     {
         try{
             $indo_switch_client = IndoOcbcSwitchClientFactory::build();
@@ -78,7 +78,7 @@ class BTIndoOCBCPaymentRequestService extends PaymentRequestService{
         return false;
     }
 
-    public function _completeAction(PaymentRequest $request)
+    protected function _completeAction(PaymentRequest $request)
     {
         //make request to switch
         try{

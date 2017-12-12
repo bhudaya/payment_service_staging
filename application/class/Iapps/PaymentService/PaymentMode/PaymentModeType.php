@@ -29,4 +29,5 @@ class PaymentModeType{
     const BANK_TRANSFER_TRANSFERTO = 'TT1';
     const BANK_TRANSFER_TRANSFERTO_3 = 'TT3';
     const CASH_PICKUP_TRANSFERTO_2 = 'CP2';
+    const MAIN_AGENT_WORK_CREDIT = 'WC1';
 }

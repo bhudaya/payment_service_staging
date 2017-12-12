@@ -68,6 +68,9 @@ class PaymentAccessCheckerFactory{
             case PaymentModeType::CASH_PICKUP_TRANSFERTO_2:
                 return new TransferToPaymentAccessChecker();
 
+            case PaymentModeType::MAIN_AGENT_WORK_CREDIT:
+                return new WorkCreditPaymentAccessChecker();
+                
             default:
                 return new PaymentAccessChecker();
         }

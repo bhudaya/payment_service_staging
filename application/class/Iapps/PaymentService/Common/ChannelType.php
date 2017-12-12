@@ -13,6 +13,8 @@ class ChannelType implements SystemCodeInterface{
     const CODE_CORPORATE_PANEL      = 'corp_panel';
     const CODE_PARTNER_PANEL        = 'partner_panel';
     const CODE_PUBLIC_APP           = 'pub_app';
+    const CODE_EMPLOYER_APP_IOS     = 'employer_app_ios';
+    const CODE_EMPLOYER_APP_ANDROID = 'employer_app_android';
 
     public static function getSystemGroupCode()
     {

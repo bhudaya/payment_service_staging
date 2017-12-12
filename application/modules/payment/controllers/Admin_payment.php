@@ -339,4 +339,22 @@ class Admin_payment extends Admin_Base_Controller{
         $this->_respondWithCode($this->_service->getResponseCode(), ResponseHeader::HEADER_NOT_FOUND);
         return false;
     }
+
+    public function reconDownload()
+    {
+        if (!$admin_id = $this->_getUserProfileId())
+            return false;
+
+        if (!$this->is_required($this->input->get(), array('payment_code', 'trx_date'))) {
+            return false;
+        }
+        $payment_code = $this->input->get('payment_code');
+        $trx_date = $this->input->get('trx_date');
+        if ($payment_service = PaymentRequestServiceFactory::build($payment_code)) {
+            if ($result = $payment_service->reconDownload($trx_date)) {
+                return true;
+            }
+        }
+        return false;
+    }
 }

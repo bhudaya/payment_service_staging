@@ -6,6 +6,7 @@ class BNISwitchFunction {
 
     const CODE_REMIT             = 'remit';
     const CODE_INQUIRY           = 'inquiry';
+    const CODE_INFO              = 'info';
 
 
     const BNI_REMIT_BNI_SOAP_REQUEST = 'urn:RemitAPI#creditCASAOnLine';
