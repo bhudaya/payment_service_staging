@@ -7,6 +7,7 @@ use Iapps\Common\Core\IpAddress;
 use Iapps\PaymentService\Common\MessageCode;
 use Iapps\PaymentService\PaymentRequest\TransfertoRetryTransactionService;
 use Iapps\PaymentService\PaymentRequest\TransfertoCp2RetryTransactionService;
+use Iapps\PaymentService\PaymentRequest\BNIRetryTransactionService;
 use Iapps\PaymentService\PaymentRequest\TMoneyCheckServerService;
 
 class Cli_batch_job extends Cli_Base_Controller{
@@ -51,6 +52,23 @@ class Cli_batch_job extends Cli_Base_Controller{
         RequestHeader::set(ResponseHeader::FIELD_X_AUTHORIZATION, $this->clientToken);
 
         $retry_serv = new TransfertoCp2RetryTransactionService();
+        $retry_serv->setUpdatedBy($system_user_id);
+        $retry_serv->setIpAddress(IpAddress::fromString($this->_getIpAddress()));
+
+        $retry_serv->process();
+        $this->_respondWithSuccessCode(MessageCode::CODE_JOB_PROCESS_PASSED);
+        return true;
+    }
+
+    public function retryBniTransaction()
+    {
+
+        if (!$system_user_id = $this->_getUserProfileId())
+            return false;
+
+        RequestHeader::set(ResponseHeader::FIELD_X_AUTHORIZATION, $this->clientToken);
+
+        $retry_serv = new BNIRetryTransactionService();
         $retry_serv->setUpdatedBy($system_user_id);
         $retry_serv->setIpAddress(IpAddress::fromString($this->_getIpAddress()));
 
