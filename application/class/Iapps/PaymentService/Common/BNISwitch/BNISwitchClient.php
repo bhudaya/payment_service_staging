@@ -49,6 +49,23 @@ class BNISwitchClient implements PaymentRequestClientInterface{
     protected $trans_date_bni;
     protected $reference_no_bni;
     protected $inst_name;
+    protected $transactionID;
+    protected $receiver_email;
+
+    protected $_number_of_check_trx =0 ;
+    protected $info ;
+    protected $_transfer_hit_count = 0 ;
+    protected $_inquiry_hit_count = 0 ;
+    protected $_last_process;
+    protected $_check_trx_info = array() ;
+    protected $_last_rc ;  //the last response code
+    protected $_transfer_response ;
+    protected $response_fields ;
+    protected $bni_info;
+    protected $_inquiry_response ;
+    protected $switcher_transaction_no;
+    protected $_timeout_of_check_trx = 0;
+    protected $_internal_reff_id  ;
 
     function __construct(array $config)
     {
@@ -65,12 +82,81 @@ class BNISwitchClient implements PaymentRequestClientInterface{
         $this->_http_serv->setUrl($this->_getUrl());
     }
 
+    public function bankTransfer(){
+
+        $this->getLastResponse(); //get from  db fields
+        $this->setLastResponse(); //set to class fields
+
+        if ($this->_last_rc == "PRC") {
+            if ( ($this->_last_process == "check_transaction"  && $this->_number_of_check_trx <=2  &&  $this->_timeout_of_check_trx ==1)    ||   ($this->_last_process == "transfer" && $this->_number_of_check_trx == 0)) {
+
+                $rslt = $this->checkTrx();
+                if($this->_number_of_check_trx == 3) {
+                    $response = $this->formatToFail("Received timeout when check transaction");
+                    return new BNISwitchResponse($response, 'poInfoInquiry');  //
+                }
+
+                if ($rslt["resultCode"] == "0") {
+                    return $rslt;
+                } else {
+                    if ($rslt["resultCode"] == "1") {
+                        $response = $this->formatToFail("Transaction ID is not found");
+                    } else {
+                        $response = $this->formatToFail("Received timeout when check transaction");
+
+                    }
+                }
+                return new BNISwitchResponse($response, "poInfoInquiry");
+            }
+        }
+
+        if ($inquiryResponse = $this->inquiry()) {
+
+            $this->_inquiry_response = json_decode($inquiryResponse->getFormattedResponse(),true) ;
+            $this->_addInfo("inquiry_response",$this->_inquiry_response);
+
+            //remove saluation
+            $account_name = $this->remove_saluation($inquiryResponse->getDestAccHolder());
+            $inquiryResponse->setDestAccHolder($account_name);
+
+            if (!$inquiryResponse->isSuccess()) {
+                // max 2 times in inquiry timeout
+                if($inquiryResponse->getResponseCode() == "PRC"  &&  $this->_inquiry_hit_count >= 2 ){
+                    //set to fail
+                    $response = $this->formatToFail("Received timeout when inquiry process");
+                    return new BNISwitchResponse($response,"accountInfoInquiry");
+                }
+                return $inquiryResponse;
+            }                        
+        }else{            
+            return false ;
+        }
+
+        if( $trfResponse = $this->transfer()) {
+            $this->_transfer_response = json_decode($trfResponse->getFormattedResponse(),true) ;
+            $this->_addInfo("transfer_response", $this->_transfer_response);
+
+            if (!$trfResponse->isSuccess()) {
+                if ($trfResponse->getResponseCode() == "PRC" ) {
+                    //set to fail
+                    if($this->_transfer_hit_count > 1){
+                        $response = $this->formatToFail("Received timeout when transfer process");
+                        return new BNISwitchResponse($response, "accountInfoInquiry");
+                    }
+                }
+            }
+            return $trfResponse;  // return timeout
+        }else{            
+            return false;
+        }
+    }
+        
+
     public function generateSignedData($type){
 
         $pkcs12 = file_get_contents($this->_getPrivateKeyFile());
         openssl_pkcs12_read( $pkcs12, $certs, "" );
         $private_key_pem =  $certs['pkey'] ;
-
 
         if($type == BNISwitchFunction::CODE_INQUIRY){
             $data       =  $this->_getClientId() . $this->getBankCode() . $this->getAccountNo() ;
@@ -78,6 +164,13 @@ class BNISwitchClient implements PaymentRequestClientInterface{
             openssl_sign($data, $signature, $private_key_pem, OPENSSL_ALGO_SHA1);
             $encodedSignature = base64_encode($signature);
             return $encodedSignature ;
+
+        }else if($type == BNISwitchFunction::CODE_INFO){
+            $data       =  $this->_getClientId() . $this->getReferenceNoBni() ;
+            openssl_sign($data, $signature, $private_key_pem, OPENSSL_ALGO_SHA1);
+            $encodedSignature = base64_encode($signature);
+            return $encodedSignature ;
+
         }else if($type == BNISwitchFunction::CODE_REMIT){
 
             $ref_number_bni =     str_ireplace(['RMT','TR'], '', $this->getReferenceNo());
@@ -131,13 +224,17 @@ class BNISwitchClient implements PaymentRequestClientInterface{
             return new BNISwitchResponse($response, 'accountInfoInquiry');
         }
         $response = $this->_http_serv->post($header, $this->_option);
-        return new BNISwitchResponse($response, 'accountInfoInquiry');
+
+        $format_response = new BNISwitchResponse($response, 'accountInfoInquiry');
+        $account_name = $this->remove_saluation($format_response->getDestAccHolder()) ;
+        $format_response->setDestAccHolder($account_name);
+        return  $format_response ;
     }
 
 
     public function checkTrx()
      {
-         $this->setInquireSignedData($this->generateSignedData('chcek'));
+         $this->setInquireSignedData($this->generateSignedData('info'));
 
          $option = '<s:Envelope xmlns:env = "http://www.w3.org/2003/05/soap-envelope" xmlns:dpm = "http://www.datapower.com/schemas/management"
             xmlns:dpfunc = "http://www.datapower.com/extensions/functions" xmlns:s = "http://schemas.xmlsoap.org/soap/envelope/" >
@@ -150,7 +247,7 @@ class BNISwitchClient implements PaymentRequestClientInterface{
             <paymentOrderKey >
             <refNumber>'.$this->getReferenceNoBni().'</refNumber>
             <clientId>'.$this->_getClientId().'</clientId>
-            <trxDate>2016-01-05T00:00:00</trxDate>
+            <trxDate>'. $this->getTransDateBni().'</trxDate>
             </paymentOrderKey>
             </poInfoInquiry>
             </s:Body>
@@ -170,10 +267,8 @@ class BNISwitchClient implements PaymentRequestClientInterface{
 
 
     public function inquiry(){
-        if(!$inquire_signed_data = $this->getInquireSignedData()){
-            $this->setInquireSignedData($this->generateSignedData('inquiry'));
-        }
-
+        $this->setInquireSignedData($this->generateSignedData('inquiry'));
+        $this->_inquiry_hit_count++;
 
         $option = '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
                     <s:Body xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
@@ -189,28 +284,41 @@ class BNISwitchClient implements PaymentRequestClientInterface{
                     </s:Envelope>';
 
 
+        //to save in inquiry param (log)
+        $option_array = array(
+            'bankCode'=>$this->getBankCode(),
+            'accountNum'=>$this->getAccountNo()           
+        );
+        
         $this->_option = $option;
-
         $header = array
         (
             'Content-Type: text/xml',
         );
+        
         $this->_http_serv->seturl($this->_getUrl());
-
         set_time_limit($this->_getTimeLimit());
         $response = $this->_http_serv->post($header, $this->_option);
-        return new BNISwitchResponse($response, 'accountInfoInquiry');  //   accountInfoInquiry /apiStatus = xml field response
+
+        $this->_addInfo("number_of_inquiry_calls",$this->_inquiry_hit_count);
+        $this->_addInfo("last_process","inquiry");
+        $this->_addInfo("inquiry_param",$option_array);
+
+        $format_response =  new BNISwitchResponse($response, 'accountInfoInquiry');  //   accountInfoInquiry /apiStatus = xml field response
+        $account_name = $format_response->getDestAccHolder();
+        $format_response->setDestAccHolder($account_name);
+        return $format_response ;
     }
 
 
 
-    public function bankTransfer()
+    public function transfer()
     {
 
-        if(!$inquire_signed_data = $this->getInquireSignedData()){
-            $this->setInquireSignedData($this->generateSignedData('remit'));
-        }
-        
+        $this->setInquireSignedData($this->generateSignedData('remit'));
+
+        $this->_transfer_hit_count++;
+
         $option = '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
                     <s:Body xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
                     <processPO xmlns="http://service.bni.co.id/remm">
@@ -245,6 +353,20 @@ class BNISwitchClient implements PaymentRequestClientInterface{
                     </processPO>
                     </s:Body>
                     </s:Envelope>';
+        
+        
+        //to save in transfer param (log)
+        $option_array = array(
+            'refNumber'=>$this->getReferenceNoBni(),
+            'trxDate'=>$this->getTransDateBni(),
+            'currency'=>$this->getLandedCurrency(),
+            'amount'=>$this->getLandedAmount(),
+            'orderingName'=>$this->getSenderFullname(),
+            'orderingAddress1'=>$this->getSenderAddress1(),
+            'beneficiaryAccount'=>$this->getAccountNo(),
+            'beneficiaryName'=>$this->getReceiverFullname(),
+            'beneficiaryPhoneNumber'=>$this->getReceiverMobilePhone()           
+        );
 
         $this->_option = $option;
 
@@ -253,12 +375,15 @@ class BNISwitchClient implements PaymentRequestClientInterface{
             'Content-Type: text/xml'
         );
 
-
         $this->_http_serv->seturl($this->_getUrl());
-
         //curl
         set_time_limit($this->_getTimeLimit());
         $response = $this->_http_serv->post($header, $this->_option);
+
+        $this->_addInfo("transfer_param",$option_array);
+        $this->_addInfo("number_of_transfer_calls",$this->_transfer_hit_count);
+        $this->_addInfo("last_process","transfer");
+
         return new BNISwitchResponse($response, 'processPO');
     }
 
@@ -363,7 +488,7 @@ class BNISwitchClient implements PaymentRequestClientInterface{
     {
         $c = new BNISwitchClient($config);
 
-        $c->setSenderFullName('User Slide');
+        $c->setSenderFullname('User Slide');
         if( isset($option['signed_data']) )
             $c->setSignedData($option['signed_data']);
         if( isset($option['inquire_signed_data']) )
@@ -375,13 +500,13 @@ class BNISwitchClient implements PaymentRequestClientInterface{
             $c->setTransDateBni($option['trans_date']  . 'T'. date('H:i:s'));
         }
         if( isset($option['sender_fullname']) )
-            $c->setSenderFullName($option['sender_fullname']);
+            $c->setSenderFullname($option['sender_fullname']);
         if( isset($option['sender_address']) )
             $c->setSenderAddress($option['sender_address']);
         if( isset($option['sender_phone']) )
             $c->setSenderPhone($option['sender_phone']);
         if( isset($option['receiver_fullname']) )
-            $c->setReceiverFullName($option['receiver_fullname']);
+            $c->setReceiverFullname($option['receiver_fullname']);
         if( isset($option['receiver_address']) )
             $c->setReceiverAddress($option['receiver_address']);
         if( isset($option['receiver_mobile_phone']) )
@@ -594,7 +719,9 @@ class BNISwitchClient implements PaymentRequestClientInterface{
 
     public function setReceiverFullname($receiver_fullname)
     {
+        $receiver_fullname = $this->remove_saluation($receiver_fullname);
         $this->receiver_fullname = trim($receiver_fullname);
+
         $arrName = $this->formatName($this->receiver_fullname);
 
         $this->receiver_firstname = isset($arrName[0]) ? $arrName[0] : '';
@@ -852,7 +979,7 @@ class BNISwitchClient implements PaymentRequestClientInterface{
             'inquire_signed_data' => $this->getInquireSignedData(),
             'trans_date' => $this->getTransDate(),
             'reference_no' => $this->getReferenceNo(),
-            'sender_fullname' => $this->getSenderFullName(),
+            'sender_fullname' => $this->getSenderFullname(),
             'sender_address' => $this->getSenderAddress(),
             'sender_phone' => $this->getSenderPhone(),
             'receiver_fullname' => $this->getReceiverFullname(),
@@ -868,7 +995,158 @@ class BNISwitchClient implements PaymentRequestClientInterface{
         return json_encode($option);
     }
 
+    public function remove_saluation($name) {
+        $saluations = array("ibu","bapak" ,"bpk" ,"tuan" ,"nyonya" ,"mr" );
+        $name = strtolower($name);
+        $name =  str_replace(".","",$name);
+        $name =  str_replace(",","",$name);
+
+        foreach($saluations as $find) {
+            if (strpos($name, $find) !== false){
+                $name =  str_replace($find,"",$name);
+            }
+        }
+        $name = ltrim(strtoupper($name));
+        return $name;
+    }
     
     
+    //-----------------------------------------------------------------------
+
+    public function setLastResponse(){
+        $this->_addInfo("number_of_inquiry_calls",$this->_inquiry_hit_count);
+        $this->_addInfo("number_of_transfer_calls",$this->_transfer_hit_count);
+        $this->_addInfo("number_of_check_trx",$this->_number_of_check_trx);
+        $this->_addInfo("check_trx_info",$this->_check_trx_info);
+    }
+
+    public function getLastResponse(){
+        //get last response from request
+        $last_response = $this->getResponseFields() ;
+        if(array_key_exists('bni_process', $last_response)) {
+            $bni_process = json_decode($last_response["bni_process"], true);
+            if(array_key_exists('number_of_inquiry_calls', $bni_process))
+                $this->_inquiry_hit_count        =  $bni_process["number_of_inquiry_calls"];
+            if(array_key_exists('number_of_transfer_calls', $bni_process))
+                $this->_transfer_hit_count       =  $bni_process["number_of_transfer_calls"];
+            if(array_key_exists('last_process', $bni_process))
+                $this->_last_process             =  $bni_process["last_process"];
+            if(array_key_exists('check_trx_info', $bni_process))
+                $this->_check_trx_info           =  $bni_process["check_trx_info"];
+            if(array_key_exists('number_of_check_trx', $bni_process))
+                $this->_number_of_check_trx     =  $bni_process["number_of_check_trx"];
+
+            if(array_key_exists('number_of_quotation_calls', $bni_process))
+                $this->_quot_hit_count        =  $bni_process["number_of_quotation_calls"];
+
+            if(array_key_exists('timeout_of_check_trx', $bni_process))
+                $this->_timeout_of_check_trx     =  $bni_process["timeout_of_check_trx"];
+        }
+        if(array_key_exists('bni_response', $last_response)) {
+            $bni_response = json_decode($last_response["bni_response"], true);
+            if(array_key_exists('status', $bni_response))
+                $this->_last_rc  =  $bni_response["status"];
+        }
+    }
+    
+    protected function _addInfo($key,$value)
+    {
+        $this->info[$key] = $value;
+        $this->setBniInfo(json_encode($this->getInfo()));
+        return $this ;
+    }
+    
+    protected function _removeInfo($key)
+    {
+        unset($this->info[$key]);
+        $this->setBniInfo(json_encode($this->getInfo()));
+        return $this ;
+    }
+
+    public function getBniInfo()
+    {
+        return $this->bni_info;
+    }
+    public function setBniInfo($bni_info)
+    {
+        $this->bni_info = $bni_info;
+    }
+
+    public function getInfo()
+    {
+        return $this->info;
+    }
+    public function setInfo($info)
+    {
+        $this->info = $info;
+    }
+
+    public function getResponseFields()
+    {
+        return $this->response_fields;
+    }
+    public function setResponseFields($response_fields)
+    {
+        $this->response_fields = $response_fields;
+    }
+
+    public function getSelectedArray(array $fields , array $selected){
+        $result = array() ;
+        foreach ($fields  as $i => $value) {
+            if(in_array($i ,$selected)){
+                $result[$i] =$value;
+            }
+        }
+        return $result;
+    }
+
+
+    public function formatToFail($msg){
+          $format = '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:soapenc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+                        <soapenv:Header />
+                        <soapenv:Body>
+                        <soapenv:Fault xmlns:m="http://service.bni.co.id/remm" xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+                           <faultcode>m:Fault</faultcode>
+                           <faultstring></faultstring>
+                           <detail encodingStyle="">
+                              <remm:Fault_element xmlns:remm="http://service.bni.co.id/remm">
+                                     <errorCode></errorCode>
+                                     <errorDescription>'.$msg.'</errorDescription>
+                               </remm:Fault_element>
+                             </detail>
+                        </soapenv:Fault>
+                        </soapenv:Body></soapenv:Envelope>';
+
+           return $format;
+    }
+
+
+    public function formatSuccess($ref_number){
+
+        $format = '<soapenv:Envelope 
+                    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
+                    xmlns:soapenc="http://schemas.xmlsoap.org/soap/encoding/" 
+                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+                    <soapenv:Header/> 
+                    <soapenv:Body>
+                    <remm:poInfoInquiryResponse xmlns:remm="http://service.bni.co.id/remm">
+                    <paymentInfoList> <paymentInfo>
+                    <status>NEW</status> <statusDescription>NEW</statusDescription> <paymentDetail>
+                    <bniReference>'.$ref_number.'</bniReference> 
+                    <paidDate/>
+                    <paidCurrency/>
+                    <paidAmount/>
+                    <chargesAmount/> 
+                    <beneficiaryAccount/> 
+                    <beneficiaryName/>
+                    </paymentDetail> 
+                    </paymentInfo>
+                    </paymentInfoList> 
+                    </remm:poInfoInquiryResponse>
+                    </soapenv:Body> 
+                    </soapenv:Envelope>';
+
+        return $format;
+    }
     
 }
