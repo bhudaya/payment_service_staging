@@ -49,10 +49,8 @@ class TMoneySwitchResponse implements PaymentRequestResponseInterface{
 
     function __construct($response, $api_request)
     {
-        $this->_SwitcherMsgService = SwitcherMessageServiceFactory::build() ;
-        //$msg = $this->_SwitcherMsgService->getMessage("PB-006","en-GB","tmoney"); //en-GB
-        //print_r($msg); 
         
+        $this->_SwitcherMsgService = SwitcherMessageServiceFactory::build() ;
         $this->setAPIRequest($api_request);
         $this->setRaw($response);
     }
@@ -65,7 +63,11 @@ class TMoneySwitchResponse implements PaymentRequestResponseInterface{
         if (array_key_exists('resultCode', $fields)){
             $msg = $this->_SwitcherMsgService->getMessage($fields["resultCode"], "en-GB", "tmoney") ; //en-GB English UK
             if($msg) {
-                $fields["resultDesc"] = $msg;
+                $fields["resultDesc"] = $fields["resultCode"]."-".$msg;
+            }else{
+                if($fields["resultCode"] != "PRC"  && $fields["resultCode"] != "") {
+                    $fields["resultDesc"] = $fields["resultDesc"] . "|" . $fields["resultCode"] . "-Error Code has not been define in database";
+                }
             }
         }
 
@@ -142,7 +144,6 @@ class TMoneySwitchResponse implements PaymentRequestResponseInterface{
                 if ($field == 'user') {
                     $this->setUser($value); //object
                     $this->setToken($value->token);
-
                 }
 
             }
@@ -477,6 +478,7 @@ class TMoneySwitchResponse implements PaymentRequestResponseInterface{
 
     public function getSelectedField(array $fields)
     {
+
         return ArrayExtractor::extract($this->jsonSerialize(), $fields);
     }
 }

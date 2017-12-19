@@ -81,11 +81,13 @@ class TMoneySwitchClient implements PaymentRequestClientInterface{
     protected $switcher_transaction_no;
     protected $_transfer_response ;
     protected $_timeout_of_check_trx =0 ;
+    protected $_process_log;
 
-
-
-
-
+     /*
+       to ignore double transaction because of fail check transaction stop all re complete / payment
+       no retry to complete again unless fail sign in
+       if pending at transfer stage always check transaction until do manual reconciliation
+     */
 
     function __construct(array $config)
     {
@@ -122,13 +124,20 @@ class TMoneySwitchClient implements PaymentRequestClientInterface{
             $this->_signin_response = json_decode($signInResponse->getFormattedResponse(),true) ;
             $this->_addInfo("signin_response",$this->getSelectedArray($this->_signin_response , array("resultCode","resultDesc")));
             if ( !$signInResponse->isSuccess()) {
+                if($signInResponse->getResponseCode() == "PRC"){   
+                    $response = array(
+                        'resultCode'=>"",
+                        'resultDesc'=>"Received timeout when sign-in process"
+                    );
+                    return new TMoneySwitchResponse($response,"transfer");
+                }                
                 return $signInResponse;
             }
             $this->_removeInfo("signin_param");
             $this->setToken($signInResponse->getToken());
         }else{return false;}
 
-        if ($this->_last_rc == "PRC") {
+        if ($this->_last_rc == "PRC") {    //pending status
             $info = $this->_check_trx_info;
             $startDate = date("Y-m-d");
             $stopDate = date("Y-m-d");
@@ -140,13 +149,11 @@ class TMoneySwitchClient implements PaymentRequestClientInterface{
             if (array_key_exists('trxID', $info))
                 $trxID = $info["trxID"];
 
-            //check transaction timeout || after transfer timeout
-            if ( ($this->_last_process == "check_transaction"  && $this->_number_of_check_trx <=2  &&  $this->_timeout_of_check_trx ==1)    ||   ($this->_last_process == "transfer" && $this->_number_of_check_trx == 0)) {
+            //check transaction for transfer timeout  and after check transaction
+            //still pending after reconciliation
+            if ( ($this->_last_process == "check_transaction")    ||   ($this->_last_process == "transfer")) {
+
                 $rslt = $this->checkTrx($startDate, $stopDate, $trxID);
-                if($this->_number_of_check_trx == 3){
-                    $response = array('resultCode' => "", 'resultDesc' => "Received timeout when check transaction");
-                    return new TMoneySwitchResponse($response, "checkTrx");
-                }
                 if ($rslt["resultCode"] == "0") {
                     $response = array('resultCode' => "0", 'resultDesc' => "Transaction ID is found");
                 } else {
@@ -163,12 +170,13 @@ class TMoneySwitchClient implements PaymentRequestClientInterface{
         if( $inquiryResponse = $this->inquiry()) {
             $this->_inquiry_response = json_decode($inquiryResponse->getFormattedResponse(),true) ;
             //refNo once sent transfer
-            $this->setSwitcherReferenceNo($inquiryResponse->getRefNoSwitcher());
-            $this->setSwitcherTransactionNo($inquiryResponse->getTransactionIDSwitcher());
+            $this->setSwitcherReferenceNo($inquiryResponse->getRefNoSwitcher());           //tmoney ref no
+            $this->setSwitcherTransactionNo($inquiryResponse->getTransactionIDSwitcher()); //tmoney trx no
             $this->_addInfo("inquiry_response",$this->getSelectedArray($this->_inquiry_response , array("transactionID","refNo","resultCode","resultDesc","timeStamp")));
             if (!$inquiryResponse->isSuccess()) {
-                if($inquiryResponse->getResponseCode() == "PRC"  &&  $this->_inquiry_hit_count >= 2 ){
-                    $response = array(
+                //if($inquiryResponse->getResponseCode() == "PRC"  &&  $this->_inquiry_hit_count >= 2 ){
+                if($inquiryResponse->getResponseCode() == "PRC"){   //no retry payment if , inquiry timeout
+                        $response = array(
                         'resultCode'=>"",
                         'resultDesc'=>"Received timeout when inquiry process"
                     );
@@ -181,35 +189,32 @@ class TMoneySwitchClient implements PaymentRequestClientInterface{
 
 
         if( $trfResponse = $this->transfer()) {
-
+            
             $this->_transfer_response = json_decode($trfResponse->getFormattedResponse(),true) ;
             //refNo once sent transfer
             $this->_addInfo("transfer_response",$this->getSelectedArray($this->_transfer_response , array("transactionID","refNo","resultCode","resultDesc","timeStamp")));
             if (!$trfResponse->isSuccess()) {
-
+                
+                //don't set this if want check transaction by complete process
+                $trfResponse->setTransactionIDSwitcher($this->getSwitcherTransactionNo());
                 //if the first process is timeout , set to timeout and will call check trx at the second hit
-                if($trfResponse->getResponseCode()== "PRC"){
-                    if($this->_transfer_hit_count == 1){
-                        $info = array(
-                            'startDate'=>date("Y-m-d"),
-                            'stopDate'=>date("Y-m-d"),
-                            'trxID'=>$this->getSwitcherTransactionNo()
-                        );
-                        $this->_addInfo("check_trx_info",$info);
-                    }else{
-                        $response = array('resultCode'=>"",'resultDesc'=>"Received timeout when transfer process");
+                if($trfResponse->getResponseCode()== "PRC" ||  $trfResponse->getResponseCode()== "PB-001" ){
+                   $info = array(
+                      'startDate'=>date("Y-m-d"),
+                      'stopDate'=>date("Y-m-d"),
+                      'trxID'=>$this->getSwitcherTransactionNo()
+                   );
+                   $this->_addInfo("check_trx_info",$info);
+
+                    if($trfResponse->getResponseCode()== "PRC") {
+                        $response = array('resultCode' => "", 'resultDesc' => "Received timeout when transfer process", 'transactionID' => $this->getSwitcherTransactionNo());
                         return new TMoneySwitchResponse($response, "transfer");
                     }
-                }
-
-                //if get PB-001 at first transfer. set pending to 1 retry
-                if($trfResponse->getResponseCode()==$this->_reffno_not_found  ){
-                    if($this->_transfer_hit_count > 1) {
-                        //make fail if more one hit
-                        $response = array('resultCode' =>"", 'resultDesc' => "PB-001, Refference ID not found");
+                    if($trfResponse->getResponseCode()== "PB-001") {
+                        $response = array('resultCode' => "", 'resultDesc' => "The transfer transaction to the bank account with the reference ID is not found in our system", 'transactionID' => $this->getSwitcherTransactionNo());
                         return new TMoneySwitchResponse($response, "transfer");
-
                     }
+
                 }
             }
 
@@ -227,7 +232,6 @@ class TMoneySwitchClient implements PaymentRequestClientInterface{
         }else{return false;}
 
         $this->_number_of_check_trx++;
-
 
         $option = array(
             'terminal'=>$this->_getTerminal(),
@@ -249,7 +253,6 @@ class TMoneySwitchClient implements PaymentRequestClientInterface{
         $this->_addInfo("number_of_check_trx",$this->_number_of_check_trx);
         $this->_addInfo("timeout_of_check_trx",$this->_timeout_of_check_trx);
 
-
         $info = array(
             'startDate'=>$startDate,
             'stopDate'=>$stopDate,
@@ -257,7 +260,7 @@ class TMoneySwitchClient implements PaymentRequestClientInterface{
         );
         $this->_addInfo("check_trx_info",$info);
 
-        //$response="";  // test if timeout
+        //$response="";  // test if timeout        
         if($response) {
             $array_check = $response;
             if (array_key_exists('record', $array_check)) {
@@ -276,7 +279,7 @@ class TMoneySwitchClient implements PaymentRequestClientInterface{
         $response = array('resultCode' => "PRC", 'resultDesc' => "Received timeout when check transaction");
         $this->_timeout_of_check_trx=1;
         $this->_addInfo("timeout_of_check_trx",$this->_timeout_of_check_trx);
-        return $response ;
+        return $response ;        
 
     }
 
@@ -350,28 +353,24 @@ class TMoneySwitchClient implements PaymentRequestClientInterface{
         $this->_addInfo("last_process","signIn");
 
         set_time_limit($this->_getTimeLimit());
-        $this->_http_serv->post($this->header, $option, $this->_signInUri);
-        return new TMoneySwitchResponse($this->_http_serv->getLastResponse(),"api");
-
+        $this->_http_serv->post($this->header, $option, $this->_signInUri);  //return object
+        return  new TMoneySwitchResponse($this->_http_serv->getLastResponse(),"transfer"); //return array
 
         /*
-        //----------- to test give inquiry return success --------
-
-        $user = array("token"=>"364536546254353563432654");
+        //----------- to test give login return success --------
+        $user =  (object) array('custName'=>"test",'token'=>"364536546254353563432654");
         $response = array(
             'resultCode'=>"00",
             'resultDesc'=>"SUKSES & di-approve oleh sistem",
             'transactionID'=>"195170809230756847",
             'refNo'=>"27293811558276",
+            'status'=>"",
             'timeStamp'=>"2017-08-09 23:07:56.747673",
             'user'=>$user
         );
         return new TMoneySwitchResponse($response,"inquiry");
         //----------- end to test give inquiry return success --------
         */
-
-
-
     }
 
 
@@ -393,8 +392,8 @@ class TMoneySwitchClient implements PaymentRequestClientInterface{
             'idFusion'=>$this->_getFusionId(),
             'pin'=>$this->_getPin(),
             'token'=>$this->getToken(),
-            'transactionID'=>$this->getTransactionID(),
-            'refNo'=>$intenalRefId,
+            'transactionID'=>$this->getTransactionID(),  //slide trx id
+            'refNo'=>$intenalRefId,                      // slide  ref no
             'amount'=>$this->getLandedAmount() ,
             'bankCode'=>$this->getBankCode(),
             'bankAccount'=>$this->getAccountNo(),
@@ -419,34 +418,26 @@ class TMoneySwitchClient implements PaymentRequestClientInterface{
             'timeStamp'=>"2017-08-09 23:07:56.747673"
         );
         return new TMoneySwitchResponse($response,"inquiry");
-        //----------- end to test give inquiry return success --------
         */
-
-
-
-
-        /* //----------- to test give inquiry timeout --------
+        /*
+        return new TMoneySwitchResponse($response,"inquiry");
+        //----------- end to test give inquiry return success --------       
+        //----------- to test give inquiry timeout --------
          $response = array(
              'resultCode'=>"PRC",
              'resultDesc'=>"Received timeout when inquiry process"
          );
          return new TMoneySwitchResponse($response,"inquiry");
-         //----------- end to test give inquiry timeout -------- */
-
-
-
+         //----------- end to test give inquiry timeout --------
+        */
     }
 
 
     public function transfer()
     {
-
-
         $this->_transfer_hit_count++;
         $this->setTransactionType($this->_transferTrxType);
-
-
-
+        
         $option = array(
             'transactionType'=>$this->_transferTrxType ,
             'terminal'=>$this->_getTerminal(),
@@ -469,21 +460,19 @@ class TMoneySwitchClient implements PaymentRequestClientInterface{
         //curl
         set_time_limit($this->_getTimeLimit());
         $this->_http_serv->post($this->header, $option, $this->_inquiryTransferUri);
-
         $this->_addInfo("transfer_param",$this->getSelectedArray($option , array("transactionType","transactionID","refNo")));
         $this->_addInfo("number_of_transfer_calls",$this->_transfer_hit_count);
-        $this->_addInfo("last_process","transfer");
-
+        $this->_addInfo("last_process","transfer");        
         return  new TMoneySwitchResponse($this->_http_serv->getLastResponse(),"transfer");
-
-
         /*
         //----------- to test transfer timeout --------
         $response = array('resultCode'=>"PRC",'resultDesc'=>"Transfer timeout");
-        $trfResponse = new TMoneySwitchResponse($response,"inquiry");
         return  new TMoneySwitchResponse($response,"transfer"); //to test timeout
         //----------- end to test transfer timeout --------
         */
+
+
+
     }
 
     //set post option to Client Object , call from TMoneySwitchClientFactory
@@ -1187,7 +1176,9 @@ class TMoneySwitchClient implements PaymentRequestClientInterface{
         //get last response from request
         $last_response = $this->getResponseFields() ;
         if(array_key_exists('tmoney_process', $last_response)) {
+
             $tmoney_process = json_decode($last_response["tmoney_process"], true);
+            
             if(array_key_exists('number_of_inquiry_calls', $tmoney_process))
                 $this->_inquiry_hit_count        =  $tmoney_process["number_of_inquiry_calls"];
             if(array_key_exists('number_of_transfer_calls', $tmoney_process))
@@ -1200,6 +1191,20 @@ class TMoneySwitchClient implements PaymentRequestClientInterface{
                 $this->_number_of_check_trx     =  $tmoney_process["number_of_check_trx"];
             if(array_key_exists('timeout_of_check_trx', $tmoney_process))
                 $this->_timeout_of_check_trx     =  $tmoney_process["timeout_of_check_trx"];
+
+            //recorded old process
+            if(array_key_exists('process_log', $tmoney_process)){
+                $this->_process_log = $tmoney_process["process_log"] ;
+                if( $tmoney_process["last_process"] != "check_transaction" ) {
+                    $this->_process_log = array_push($tmoney_process ,$this->_process_log);
+                }
+            }else{
+                $this->_process_log = $tmoney_process ;
+            }
+            $this->_addInfo("process_log",$this->_process_log);
+
+
+
         }
         if(array_key_exists('tmoney_response', $last_response)) {
             $tmoney_response = json_decode($last_response["tmoney_response"], true);
