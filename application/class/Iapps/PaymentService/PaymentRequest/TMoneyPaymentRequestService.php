@@ -194,10 +194,11 @@ class TMoneyPaymentRequestService extends PaymentRequestService{
 
             //save selected sent and return data tmoney , need to compare with tmoney if fail during process
             $request->getResponse()->add('tmoney_process', $tmoney_switch_client->getTmoneyInfo());
+            // it must be set even inquiry , transfer stage to ignore re complete again from delivering process
+            $request->setReferenceID($response->getTransactionIDSwitcher()); //transaction id from payment return
+            //$request->setReferenceID($response->getRefNoSwitcher()); //refNO from payment return
             //$request->setReferenceID($tmoney_switch_client->getSwitcherReferenceNo()); //refNo once sent transfer
-
             if( $result ) {
-                $request->setReferenceID($response->getRefNoSwitcher()); //refNO from payment return
                 return parent::_completeAction($request);
             }else{
                 if($request->getStatus()==PaymentRequestStatus::FAIL){
@@ -255,18 +256,20 @@ class TMoneyPaymentRequestService extends PaymentRequestService{
 
                 if ($tmoney_response_arr["resultCode"] == "PRC"  || $tmoney_response_arr["resultCode"] == "PB-001") {
                     if ($response = $tmoney_switch_client->bankTransfer()) {
-                        $ori_request = clone($request);
 
+
+                        $request->getResponse()->setJson(json_encode(array("TMoney Bank Transfer" => $tmoney_switch_client->getTransactionType())));
+                        $request->getResponse()->add('tmoney_response', $response->getFormattedResponse());
+                        $request->getResponse()->add('tmoney_process', $tmoney_switch_client->getTmoneyInfo());
+                        //$request->setReferenceID($response->getRefNoSwitcher());
+                        $request->setReferenceID($response->getTransactionIDSwitcher()); //transaction id from payment send or return
+
+                        $ori_request = clone($request);
                         $result = $this->_checkResponse($request, $response);
                         $this->getRepository()->beginDBTransaction();
                         if ($result) {
 
                             if ($complete = parent::_completeAction($request)) {
-                                $request->getResponse()->setJson(json_encode(array("TMoney Bank Transfer" => $tmoney_switch_client->getTransactionType())));
-                                $request->getResponse()->add('tmoney_response', $response->getFormattedResponse());
-                                $request->getResponse()->add('tmoney_process', $tmoney_switch_client->getTmoneyInfo());
-                                $request->setReferenceID($response->getRefNoSwitcher());
-
                                 if (parent::_updatePaymentRequestStatus($request, $ori_request)) {
                                     Logger::debug("TMoney reprocess Request Success");
                                     Logger::debug($request->getTransactionID());
