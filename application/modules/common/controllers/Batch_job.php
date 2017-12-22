@@ -80,9 +80,9 @@ class Batch_job extends System_Base_Controller{
         if($this->input->get('recon_date')){
             $recon_date= $this->input->get('recon_date');
         }else{
-            $recon_date = Date("Y-m-d");
-            $trx_date = date('Y-m-d', strtotime('-1 days', strtotime($recon_date)));
-
+            $today = Date("Y-m-d");
+            $trx_date = date('Y-m-d', strtotime('-1 days', strtotime($today)));
+            $recon_date = date('Y-m-d', strtotime('-1 days', strtotime($today)));
         }
 
         //$trx_date= $this->input->get('trx_date') ? IappsDateTime::fromString($this->input->get('trx_date')) : (new IappsDateTime("Y-m-d"));
